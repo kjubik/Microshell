@@ -34,15 +34,13 @@ void cd(char *dest)
 
 void help()                     
 {
-	printf(YELLOW"SPECYFIKACJA PROJETKU MICROSHELL\n"
-            PINK"Obecnie obslugiwane polecenia:\n"
-            BLUE"help"RESET" - wyswietla pelna liste obslugiwanych polecen oraz informacje o projekcie\n"
+	printf("Obslugiwane polecenia:\n"
+            BLUE"help"RESET"    - wyswietla pelna liste obslugiwanych polecen oraz informacje o projekcie\n"
             BLUE"history"RESET" - wyswietla pelna liste polecen wprowadzonych przez uztykownika\n"
-            BLUE"exit"RESET" - terminates the program\n"
-            BLUE"ls"RESET" - displays all directories and files in directory\n"
-            BLUE"pwd"RESET" - displays path to current working directory\n"
-            PINK"Autor:"RESET" Wojciech Kubicki\n"
-            PINK"Data rozpoczecia:"RESET" 27th Ocotber 2022\n");
+            BLUE"exit"RESET"    - terminates the program\n"
+            BLUE"ls"RESET"      - displays all directories and files in directory\n"
+            BLUE"pwd"RESET"     - displays path to current working directory\n"
+            "Autor: Wojciech Kubicki\n");
 }
 
 void history() /* MUST CHANGE - cannot use fopen and fgetc as these are system calls */
@@ -149,7 +147,7 @@ int main()
         }
         else if(strcmp(param[0],"cd")==0){
             if(param_count < 2){
-                printf("Blad zmiany biezacego katalogu roboczego:"RED" Nie podano docelowego katalogu\n"RESET);
+                printf(RED"Blad zmiany biezacego katalogu roboczego:"RESET" Nie podano docelowego katalogu\n");
             } else cd(param[1]);
         }
         else if(strcmp(param[0], "\n")==0){
