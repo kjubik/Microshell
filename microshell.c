@@ -1,12 +1,12 @@
-#include <stdio.h>              /* printf, scanf */
-#include <stdlib.h>             /* exit(0)31m */
-#include <string.h>             /* strcmp */
-#include <unistd.h>             /* getcwd, chdir */
-#include <dirent.h>             /* void ls() - struct dirent, readdir, closedir */
-#include <stdio.h>
+#include <stdio.h>              
+#include <stdlib.h>             
+#include <string.h>             
+#include <unistd.h>             // getcwd, chdir
+#include <dirent.h>             // void ls() - struct dirent, readdir, closedir
 #include <sys/types.h>
-#include <sys/wait.h>
-#include <curses.h>             // getch();
+#include <sys/wait.h>           // not used
+#include <sys/stat.h>           // stat() - checking if entry is directory or file
+#include <errno.h>
 #define RED "\033[91m"
 #define GREEN "\033[92m"
 #define YELLOW "\033[93m"
@@ -15,169 +15,324 @@
 #define CYAN "\033[96m"
 #define RESET "\033[0m"
 #define COMMAND_COLOR PINK
+#define NO_FILE 0
+#define DIRECTORY 1
+#define REGULAR_FILE 2
+#define OTHER_FILE 3
+
+// used for testing
+#define PRINT_SOURCE printf("mv() | source: %s\n\n", source);
+#define PRINT_DESTINATION printf("mv() | destination: %s\n\n", destination);
+
+char previous_directory[PATH_MAX];
 
 
-char cwd[256] = "/home/";
-// 'duszekciapcio' should be changed to '("/home/", getlogin_r, sizeof(getlogin_r));'. As of right now getlogin_r() doesn't seem to be working.
-char previous_cwd[256] = "/home/";
-char home_directory[256] = "/home/";
+void help()
+{
+	printf("\n"
+            "Autor: Wojciech Kubicki\n"
+            "Nr Indeksu: 483780\n"
+            "----------------------\n"
+            "Obslugiwane polecenia:\n"
+            COMMAND_COLOR"help"RESET" - see list of commands and project specification\n"
+            COMMAND_COLOR"mv"RESET" - move (rename) files\n"
+            COMMAND_COLOR"tree"RESET" - list contents of directories in a tree-like format.\n"
+            COMMAND_COLOR"clear"RESET" - clear the terminal screen\n"
+            COMMAND_COLOR"exit"RESET" - causes normal process termination\n"
+            "\n");
+
+    return;
+}
 
 
 void cd(char *destination)
 {
+    // Saves current working directory for updating previous_directory later.
+    char temp_directory[PATH_MAX];
+    getcwd(temp_directory, sizeof(temp_directory));
+
+    // replace below if statement with code that inserts getenv("HOME") in place of '~' character
     if (strcmp(destination, "~") == 0) {
-        // Copy cwd to previous_cwd.
-        strncpy(previous_cwd, cwd, sizeof(cwd));
-
-        // Change cwd to home diresctory.
-        strncpy(cwd, home_directory, sizeof(home_directory));
-
-        /* change directory here */
+        chdir(getenv("HOME"));
     }
-    else if (strcmp(destination, ".") == 0) {
-        // Do nothing.
+    else if (strcmp(destination, "-") == 0){
+        printf("%s\n", previous_directory);
+        chdir(previous_directory);  // previous_directory is initialy set to the HOME enviroment variable, updated after first cd function call
     }
-    else if (strcmp(destination, "..") == 0) {
-        // Copy cwd to previous_cwd.
-        strncpy(previous_cwd, cwd, sizeof(cwd));
-
-        // Inseritng null terminator in position of last occurance of '/' in cwd variable.
-        char* last_dir = strrchr(cwd, '/');
-        int insert_null = last_dir - cwd;
-        cwd[insert_null] = '\0';
-
-        // Chcecking if cwd is an empty string. If yes, then set root ('/') as cwd variable.
-        if (strcmp(cwd, "\0") == 0) {
-            char root = '/';
-            strncpy(cwd, &root, 2);
-        }
-
-        /* change directory here */
-    }
-    // BUG ALERT: multiple problems with below command. Ex. despite switching between 'cd ~' and root directory with 'cd -', pwd displays root directory. 
-    else if (strcmp(destination, "-") == 0) {
-        // Creating swap variable for storing cwd value in order to update the previous_cwd later.
-        char swap[sizeof(cwd)];
-        strncpy(swap, cwd, sizeof(cwd));
-
-        strncpy(cwd, previous_cwd, sizeof(previous_cwd));
-        
-        // Copy cwd to previous_cwd.
-        strncpy(previous_cwd, swap, sizeof(cwd));
-
-        /* change directory here */
-    } 
     else {
-        DIR *directory = opendir(destination);
-
-        if (directory) {
-            closedir(directory);
-            if (strcmp(cwd, "/") != 0) {  // If the cwd isn't the root folder, then append '/' to end of cwd (before appending name of destination folder).
-                char slash = '/';
-                strncat(cwd, &slash, 1);
-            }
-            strncat(cwd, destination, sizeof(cwd)+sizeof(destination)); // when using sizeof(destination) '/Microshell' gets cut down to '/Microshe'. Possible fix?
-            // Should work now with 'sizeof(cwd)' added.
-
-            /* change directory here */
+        if(chdir(destination) != 0){
+            printf("-bash: cd: %s: No such file or directory\n", destination);
         }
     }
 
-    // Possibly bypass chdir by changing PWD or PATH environment variable.
-    //chdir(destination);
-    setenv("PATH", "/home", 1);  // Still doesn't work.  
+    // Updating previous_directory location.
+    strcpy(previous_directory, temp_directory);
 
     return;
 }
 
 
-void help()                     
+// below functions are used for mv()
+
+char* replace_symbol(char *path, char *symbol, char *replacement)
 {
-	printf("\nObslugiwane polecenia:\n"
-            COMMAND_COLOR"help"RESET" - wyswietla pelna liste obslugiwanych polecen oraz informacje o projekcie\n"
-            COMMAND_COLOR"mv"RESET" - przenosi pliki, lub zmienia nazwę pliku\n"
-            COMMAND_COLOR"exit"RESET" - konczy prace programu\n"
-            "Autor: Wojciech Kubicki\n"
-            "Nr Indeksu: 483780\n\n");
-
-    return;
-}
-
-
-void mv(char *source, char *destination)
-{
-    char character;
-
-    FILE *source_pointer;
-    source_pointer = fopen(source, "r");
-
-    FILE *destination_pointer;
-    destination_pointer = fopen(destination, "w");
-
-    while (character != EOF) {
-        character = fgetc(source_pointer);
-        fputc(character, destination_pointer);
+    while (strstr(path, symbol) != NULL) {
+        memmove(path + strlen(replacement), path + strlen(symbol), strlen(path) - strlen(symbol) + 1);
+        memcpy(path, replacement, strlen(replacement));  // Using strcpy() inserts '/0' after inserted substring.
     }
 
-    fclose(source_pointer);
-    fclose(destination_pointer);
+    return path;
+}
+
+/*
+char *relative_to_absolute(char *path)
+{
+
+}
+*/
+
+
+int check_file_type(char *path)
+{
+    DIR *directory = opendir(path);
+    if (directory != NULL) {
+        closedir(directory);
+        return DIRECTORY;
+    }
+    
+    FILE *file = fopen(path, "r");
+    if (file != NULL) {
+        fclose(file);
+        return REGULAR_FILE;
+    }
+    
+    if (path[strlen(path)-1] == '/') {
+        return NO_FILE;
+    }
+    else return REGULAR_FILE; /* this could also be OTHER_FILE, but should I try and implement other files as well? 
+    I tried using 'struct stat entry;', but that was a mess. 
+    This if-else-tree for directories and regular files is a headache free solution. :) */
+}
+
+
+void move_file(char *source, char *destination)
+{
+    char byte;
+
+    FILE *source_file;
+    source_file = fopen(source, "r");
+    if (source_file == NULL) {
+        perror(source);
+        return;
+    }
+
+    FILE *destination_file;
+    destination_file = fopen(destination, "w");
+    if (destination_file == NULL) {
+        perror("Error opening file for writing");
+        return;
+    }
+
+    while ((byte = fgetc(source_file)) != EOF) {
+        fputc(byte, destination_file);
+    }
+
+    fclose(source_file);
+    fclose(destination_file);
+    remove(source);
 
     return;
 }
 
 
-void test();  // This function is used only for testing new code.
+void move_directory(char *destination)
+{
+    DIR *directory = opendir(destination);
+    if (directory == NULL) {
+        perror("move_directory");
+        return;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(directory)) != NULL) {
+        // code here: get rwx permissions of file
+
+        if (entry->d_type == DT_DIR) {
+            // todo -
+            // create new directory in destination
+            // run function recursively with new directory path as destination
+            // todo - remove directory
+        }
+        else if (entry->d_type == DT_REG) {
+            // todo - create new file in destination
+            // todo - remove file
+        }
+    }
+    closedir(directory);
+    return;
+}
+
+
+ // todo - if (strstr(source, "~") == 0) strcpy(source, getenv("HOME"));
+void mv(char *source_short_memory, char *destination_short_memory)  
+{
+    // copies paramaters passed into function into strings with larger memory allocation  - fixed truncation when replacing '~' with full path in replace_symbol
+    char source[PATH_MAX];
+    //char *source = malloc(PATH_MAX);
+    strcpy(source, source_short_memory);
+
+    char destination[PATH_MAX];
+    strcpy(destination, destination_short_memory);
+
+    // modifies paths containing "~" and/or "." with full path names <- without this opening files wasn't handled properly
+    char cwd[PATH_MAX];
+    getcwd(cwd, sizeof(cwd));
+    strcpy(source, replace_symbol(source, "~", getenv("HOME")));
+    strcpy(source, replace_symbol(source, ".", cwd));
+    strcpy(destination, replace_symbol(destination, "~", getenv("HOME")));
+    strcpy(destination, replace_symbol(destination, ".", cwd));
+
+    // checks if path is valid for paths requiring relative navigating using '..'
+    /*
+    if (strstr(source, "..")) source = relative_to_absolute(source);
+    if (strstr(destination, "..")) destination = relative_to_absolute(destination);
+    */
+
+    int source_type = check_file_type(source), destination_type = check_file_type(destination);
+
+    if ((source_type == REGULAR_FILE) && (destination_type == REGULAR_FILE)) {
+        // checking if inodes of source file and destination file are the same
+        struct stat file1, file2;
+
+        if (stat(source, &file1) == -1) {
+            perror(source);
+            return;
+        }
+
+        stat(destination, &file2);
+
+        if (file1.st_ino != file2.st_ino) {
+            move_file(source, destination);
+        }
+        else {
+            printf("mv:"RED" '%s' and '%s' are the same file\n"RESET, source, destination);
+            return;
+        }
+    }
+    else if ((source_type == REGULAR_FILE) && (destination_type == DIRECTORY)) {
+        // appends source filename to destination
+        char filename[256];  
+        if (strchr(source, '/') != NULL) {  // if true then source path conatains directory/-ies
+            int i = 0, last;
+            for (i; i < strlen(source); i++) {  // gets index of last '/' character, all characters after '/' are the filename
+                if (source[i] == '/') last = i+1;
+            }
+            strncpy(filename, source + last, strlen(source) - last);
+        }
+        else strcpy(filename, source);
+
+        // needs to insert '/' as last character of destination
+        // the variable desitnation used in move_file() is of the format {char destination + "/" + char filename}
+        if (destination[strlen(destination) - 1] != '/') {
+            strcat(destination, "/");
+        }
+
+        strcat(destination, filename);
+
+        move_file(source, destination);
+    }
+    else if ((source_type == DIRECTORY) && (destination_type == DIRECTORY))  {
+        printf("directory -> directory\n");
+
+        // make directory in destination
+        move_directory(source);
+    }
+    else {
+        printf("mv: source and destination types are incompatible\n");
+    }
+
+    return;
+}
+
+
+void ls()
+{
+    /* code here */
+    printf("ls\n");
+
+    return;
+}
+
+
+void tree(char *path, int indentlevel)
+{
+    /* code here */
+    printf("tree\n");
+
+    return;
+}
+
+
+void clear()
+{
+    printf("\033c");
+    return;
+}
+
+
+void test()
+{
+    // code here
+    
+    return;
+}
 
 
 int main()
 {
-    printf("%s\n", getenv("PWD"));
-
-    // Setting starting point as user home directory. This should be later changed to setenv() or putenv().
-    chdir("/home/duszekciapcio");
-    printf("%s\n", getenv("PWD"));
-    putenv("PWD=/home/duszekciapcio/Desktop");
-    printf("%s\n", getenv("PWD"));
+    chdir(getenv("HOME"));
 
     // ASCII text art
-    printf("           _                    _          _ _ \n"
+    printf(GREEN"           _                    _          _ _ \n"
             " _ __ ___ (_) ___ _ __ ___  ___| |__   ___| | |\n"
             "| '_ ` _ \\| |/ __| '__/ _ \\/ __| '_ \\ / _ \\ | |\n"
             "| | | | | | | (__| | | (_) \\__ \\ | | |  __/ | |\n"
-            "|_| |_| |_|_|\\___|_|  \\___/|___/_| |_|\\___|_|_|\n\n"
-            "Uzyj polecenia "COMMAND_COLOR"help"RESET", aby uzyskac pelne specyfikacje projektu.\n\n");
+            "|_| |_| |_|_|\\___|_|  \\___/|___/_| |_|\\___|_|_|\n\n"RESET
+            "code by: Wojciech Kubicki\n"
+            "Use the "COMMAND_COLOR"help"RESET", command to view more information about the project.\n\n");
 
-	char command[256];
-    char *paramater[256];
+    char cwd[PATH_MAX];
+	char command[PATH_MAX];
+    char *paramater[PATH_MAX];
     int paramater_count;
 
     char *login = getenv("USER");
     char *host = getenv("NAME");  // Ubuntu doesn't have HOST variable in env, uses 'NAME' instead. Grep returns 'NAME={machine_name}' when searching for machine name.
-    strncat(cwd, login, sizeof(cwd)+sizeof(login));
-    strncat(previous_cwd, login, sizeof(previous_cwd)+sizeof(login));
-    strncat(home_directory, login, sizeof(home_directory)+sizeof(login));
+
+    getcwd(previous_directory, sizeof(previous_directory));
 
 	while(1)
 	{
-        char shortened_cwd[256];
-        strcpy(shortened_cwd, cwd);
-        char *home_directory_beginning = strstr(shortened_cwd, home_directory);
-        
-        if (home_directory_beginning != NULL) {
-            memmove(home_directory_beginning + strlen("~"), home_directory_beginning + strlen(home_directory), strlen(home_directory_beginning) - strlen(home_directory) + 1);
-            memcpy(home_directory_beginning, "~", strlen("~"));  // Using strcpy() inserts '/0' after inserted substring. 
+        // Replacing HOME path in cwd variable with '~' symbol.
+        if (strstr(getcwd(cwd, sizeof(cwd)), getenv("HOME")) != NULL) {
+            // write here explenation for below code {https://www.youtube.com/watch?v=0qSU0nxIZiE}
+            // First step: get pointer to begining of searched substring in string
+            // Second step: move characters from string to 'left' or 'right' depending on if inserted substring is smaller or larger than original substring
+            // Third step: 
+            memmove(cwd + strlen("~"), cwd + strlen(getenv("HOME")), strlen(cwd) - strlen(getenv("HOME")) + 1);
+            memcpy(cwd, "~", strlen("~"));  // Using strcpy() inserts '/0' after inserted substring.
+        }
 
-            // Using username causes the '[' sign to disapear when printing string. Check if this problem also occures on lab compputer.
-            printf("["GREEN"%s@%s"RESET":"CYAN"%s"RESET"]$ ", login, host, shortened_cwd);
-        } else printf("["GREEN"%s@%s"RESET":"CYAN"%s"RESET"]$ ", login, host, cwd);
+        // Printing user, host name and current working directory.
+        // [user@host:cwd]$ 
+        printf("["GREEN"%s@%s"RESET":"BLUE"%s"RESET"]$ ", login, host, cwd);
         
+        // Gets user input.
 		fgets(command, sizeof(command), stdin);
-        
-        if (strcmp(command, "\n")!=0)  // Skip empty input.
-        {
+        if (strcmp(command, "\n") != 0) {  // Skip empty input.
             // Tokenizing string into paramaters.
             paramater_count = 0;
-            char *token = strtok(command, " \n");
+            char *token = strtok(command, " \n");  // TO ADD: Read all spaces in between quotes.
             while(token != NULL){
                 paramater[paramater_count] = token;
                 token = strtok(NULL, " \n");
@@ -186,50 +341,42 @@ int main()
             paramater[paramater_count] = NULL;  // This fixed segmentation fold.
         }
         else continue;
-
+        
         // Checking for command in my microshell function implementations.
-
-		if (strcmp(paramater[0],"help") == 0) 
-        {
+		if (strcmp(paramater[0],"help") == 0) {
             help();
 		} 
-        else if ((strcmp(paramater[0],"exit") == 0) || (strcmp(paramater[0],"q") == 0)) 
-        {
+        else if ((strcmp(paramater[0],"exit") == 0) || (strcmp(paramater[0],"q") == 0)) {
 			printf("\nProgram zakonczony\n\n");
             exit(EXIT_SUCCESS);
         }
-        else if (strcmp(paramater[0],"cd") == 0) 
-        {
+        else if (strcmp(paramater[0],"cd") == 0) {
             if (paramater_count == 1) {
                 paramater[1] = "~";
             }
             cd(paramater[1]);
         }
-        else if (strcmp(paramater[0], "mv") == 0)
-        {
+        else if (strcmp(paramater[0], "mv") == 0) {
             mv(paramater[1], paramater[2]);
         }
-        else if (strcmp(paramater[0], "test") == 0)
-        {
+        else if (strcmp(paramater[0], "tree") == 0) {
+            tree(".", 0);
+        }
+        else if (strcmp(paramater[0], "clear") == 0) {
+            clear();
+        }
+        else if (strcmp(paramater[0], "test") == 0) {
             test();
         }
-		else  // If entered command isn't implemented in program, run the Linux command.
-        {
+		else {  // If entered command isn't implemented in program, run the bash command.
             if (fork() == 0) {
 				exit(execvp(paramater[0],paramater));
 			}
 			else {
 				int status = 0;
 				wait(&status);
-                if(status == 65280) printf(RED"error code"RESET": %d\n", status);
+                if(status == 65280) printf("%s: command not found\n", paramater[0]);
 			}
-        } 
+        }
     }
-}
-
-
-void test()  // This function is only used for testing new code.
-{
-
-    return;
 }
