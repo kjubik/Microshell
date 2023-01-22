@@ -7,6 +7,12 @@
 #include <sys/wait.h>           // not used
 #include <sys/stat.h>           // stat() - checking if entry is directory or file
 #include <errno.h>
+#include <time.h>
+#include <sys/ioctl.h>          // terminal window size
+
+char previous_directory[PATH_MAX];
+
+// colors
 #define RED "\033[91m"
 #define GREEN "\033[92m"
 #define YELLOW "\033[93m"
@@ -15,30 +21,71 @@
 #define CYAN "\033[96m"
 #define RESET "\033[0m"
 #define COMMAND_COLOR PINK
+
+// file type codes
 #define NO_FILE 0
 #define DIRECTORY 1
 #define REGULAR_FILE 2
 #define OTHER_FILE 3
 
-// used for testing
-#define PRINT_SOURCE printf("mv() | source: %s\n\n", source);
-#define PRINT_DESTINATION printf("mv() | destination: %s\n\n", destination);
+// animation duration
+#define ANIMATION 100000
 
-char previous_directory[PATH_MAX];
+// history function variables
+#define HISTORY_LIMIT 1000
+char command_history[HISTORY_LIMIT][1024];
+int history_index = 0;
+
+
+void ring() {
+    putchar('\a'); 
+    fflush(stdout);
+    return;
+}
+
+void startup()
+{
+    chdir(getenv("HOME"));
+
+    struct winsize w;
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+    int width = w.ws_col;
+
+    printf("Loading |");
+    for (int i = 0; i < (width-16); i++) {
+        printf("█");
+        fflush(stdout);
+        usleep(10000);
+    }
+    printf("| Done!\n");
+    printf("Use the "COMMAND_COLOR"help"RESET", command to view more information about the project.\n\n");
+    sleep(2);
+
+    return;
+}
 
 
 void help()
 {
 	printf("\n"
-            "Autor: Wojciech Kubicki\n"
-            "Nr Indeksu: 483780\n"
             "----------------------\n"
-            "Obslugiwane polecenia:\n"
-            COMMAND_COLOR"help"RESET" - see list of commands and project specification\n"
+            "Author: Wojciech Kubicki\n"
+            "----------------------\n"
+            "Implemented commands:\n"
+            COMMAND_COLOR"cd"RESET" - change current working directory\n"
+            COMMAND_COLOR"clear"RESET" - clear the terminal screen\n"
+            COMMAND_COLOR"exit"RESET" - terminate program\n"
+            COMMAND_COLOR"help"RESET" - display commands and project specification\n"
+            COMMAND_COLOR"history"RESET" - list previously entered commands\n"
             COMMAND_COLOR"mv"RESET" - move (rename) files\n"
             COMMAND_COLOR"tree"RESET" - list contents of directories in a tree-like format.\n"
-            COMMAND_COLOR"clear"RESET" - clear the terminal screen\n"
-            COMMAND_COLOR"exit"RESET" - causes normal process termination\n"
+            "----------------------\n"
+            "Other features:\n"
+            "- custom startup animation\n"
+            "- display user login and host name\n"
+            "- color coded text\n"
+            "- sound alert for errors\n"
+            "----------------------\n"
             "\n");
 
     return;
@@ -87,7 +134,7 @@ char* replace_symbol(char *path, char *symbol, char *replacement)
 
 char *relative_to_absolute(char *cwd, char *relative_path)
 {
-    char* absolute_path = malloc(PATH_MAX); // allocate memory for the absolute path
+    char *absolute_path = malloc(PATH_MAX); // allocate memory for the absolute path
     strcpy(absolute_path, cwd); // copy current working directory to the absolute path
 
     char* token = strtok(relative_path, "/");
@@ -128,6 +175,21 @@ int check_file_type(char *path)
 }
 
 
+void extract_filename(char *path, char *filename)
+{ 
+        if (strchr(path, '/') != NULL) {  // if true then source path conatains directory/-ies
+            int i = 0, last;
+            for (i; i < strlen(path); i++) {  // gets index of last '/' character, all characters after '/' are the filename
+                if (path[i] == '/') last = i+1;
+            }
+            strncpy(filename, path + last, strlen(path) - last);
+        }
+        else strcpy(filename, path);
+
+    return;
+}
+
+
 void move_file(char *source, char *destination)
 {
     char byte;
@@ -158,36 +220,76 @@ void move_file(char *source, char *destination)
 }
 
 
-void move_directory(char *destination)
+void move_directory(char *source, char *filename, char *destination)
 {
-    DIR *directory = opendir(destination);
+    DIR *directory = opendir(source);
     if (directory == NULL) {
         perror("move_directory");
         return;
     }
 
+    // creates new directory in destination
+    char cwd[PATH_MAX];
+    getcwd(cwd, sizeof(cwd));
+    printf("changing directory to: %s\n\n", destination);
+    chdir(destination);
+    printf("making the new directory: %s\n\n", filename);
+    mkdir(filename, 0777);
+    printf("changing directory back to: %s\n\n", cwd);
+    chdir(cwd);
+
+    // moves all children regular files and directories
     struct dirent *entry;
     while ((entry = readdir(directory)) != NULL) {
         // code here: get rwx permissions of file
 
-        if (entry->d_type == DT_DIR) {
-            // todo -
-            // create new directory in destination
-            // run function recursively with new directory path as destination
-            // todo - remove directory
+        if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
+            // runs function recursively for child directory found in source directory
+            char *new_source = malloc(PATH_MAX);
+            strcpy(new_source, source);
+            strcat(new_source, "/");
+            strcat(new_source, entry->d_name);
+
+            char *new_filename = malloc(PATH_MAX);
+            strcpy(new_filename, entry->d_name);
+            
+            char *new_destination = malloc(PATH_MAX);
+            strcpy(new_destination, destination);
+            strcat(new_destination, "/");
+            strcat(new_destination, filename);
+
+            printf("new_source: %s\nnew_filename: %s\nnew_destination: %s\n", new_source, new_filename, new_destination);
+
+            move_directory(new_source, new_filename, new_destination);
+            
         }
         else if (entry->d_type == DT_REG) {
-            // todo - create new file in destination
-            // todo - remove file
+            // moves file to directory
+            char *new_source = malloc(PATH_MAX);
+            strcpy(new_source, source);
+            strcat(new_source, "/");
+            strcat(new_source, entry->d_name);
+
+            char *new_destination = malloc(PATH_MAX);
+            strcpy(new_destination, destination);
+            strcat(new_destination, "/");
+            strcat(new_destination, filename);
+            strcat(new_destination, "/");
+            strcat(new_destination, entry->d_name);
+
+            move_file(new_source, new_destination);
+
         }
     }
     closedir(directory);
+
+    // removes the directory after copying
+    rmdir(source);
     return;
 }
 
 
- // todo - if (strstr(source, "~") == 0) strcpy(source, getenv("HOME"));
-void mv(char *source_no_malloc, char *destination_no_malloc)  
+void move(char *source_no_malloc, char *destination_no_malloc)  
 {
     // copies paramaters passed into function into strings with larger memory allocation  - fixed truncation when replacing '~' with full path in replace_symbol
     char *source = malloc(PATH_MAX);
@@ -203,9 +305,10 @@ void mv(char *source_no_malloc, char *destination_no_malloc)
     strcpy(source, replace_symbol(source, ".", cwd));
     strcpy(destination, replace_symbol(destination, "~", getenv("HOME")));
     strcpy(destination, replace_symbol(destination, ".", cwd));
+    // THIS PART DOESN'T WORK RIGHT NOW. And I'll probably leave it as is. Too much work rewriting previous code
     // checks if path is valid for paths requiring relative navigating using '..'
-    if (strstr(source, "..")) strcpy(source, relative_to_absolute(cwd, source));
-    if (strstr(destination, "..")) strcpy(destination, relative_to_absolute(cwd, destination));
+    //if (strstr(source, "..")) strcpy(source, relative_to_absolute(cwd, source));
+    //if (strstr(destination, "..")) strcpy(destination, relative_to_absolute(cwd, destination));
 
     int source_type = check_file_type(source), destination_type = check_file_type(destination);
 
@@ -218,7 +321,7 @@ void mv(char *source_no_malloc, char *destination_no_malloc)
             return;
         }
 
-        stat(destination, &file2);
+        stat(destination, &file2);  // omited checking for error, because file might not exist
 
         if (file1.st_ino != file2.st_ino) {
             move_file(source, destination);
@@ -230,34 +333,43 @@ void mv(char *source_no_malloc, char *destination_no_malloc)
     }
     else if ((source_type == REGULAR_FILE) && (destination_type == DIRECTORY)) {
         // appends source filename to destination
-        char filename[256];  
-        if (strchr(source, '/') != NULL) {  // if true then source path conatains directory/-ies
-            int i = 0, last;
-            for (i; i < strlen(source); i++) {  // gets index of last '/' character, all characters after '/' are the filename
-                if (source[i] == '/') last = i+1;
-            }
-            strncpy(filename, source + last, strlen(source) - last);
-        }
-        else strcpy(filename, source);
+        char filename[PATH_MAX];
+        extract_filename(source, filename);
 
         // needs to insert '/' as last character of destination
         // the variable desitnation used in move_file() is of the format {char destination + "/" + char filename}
         if (destination[strlen(destination) - 1] != '/') {
             strcat(destination, "/");
         }
-
         strcat(destination, filename);
 
         move_file(source, destination);
+        return;
     }
-    else if ((source_type == DIRECTORY) && (destination_type == DIRECTORY))  {
+    else if (source_type == DIRECTORY /*&& destination_type == DIRECTORY*/)  {
         printf("directory -> directory\n");
 
+        char filename[PATH_MAX];
+        extract_filename(source, filename);
+
+        // checks if 
+        /*struct stat directory;
+        if (stat(destination, &directory) == -1) {
+            if (chdir() == NULL) {
+                perror("chdir failed");
+                return;
+            }
+            mkdir();
+            chdir();
+        }*/
+
         // make directory in destination
-        move_directory(source);
+        move_directory(source, filename, destination);
+        return;
     }
     else {
         printf("mv: source and destination types are incompatible\n");
+        return;
     }
 
     return;
@@ -289,6 +401,46 @@ void clear()
 }
 
 
+/* history_index = number of last entered command
+command_history = list containing entered commands
+command_count = number of lines to print out */
+void save_history(char *command) 
+{
+    if (history_index == HISTORY_LIMIT) {
+        // Overwrite the first command with the last one
+        for (int i = 0; i < HISTORY_LIMIT - 1; i++) {
+            strcpy(command_history[i], command_history[i + 1]);
+        }
+        history_index--;
+    }
+    strcpy(command_history[history_index], command);
+    history_index++;
+
+    return;
+}
+
+
+void list_history() 
+{
+    int command_count;
+    if (history_index > HISTORY_LIMIT) command_count = HISTORY_LIMIT;
+    else command_count = history_index;
+
+    for (int i = 0; i < command_count; i++) {
+        int command_num = i + 1;
+        int digits = 0;
+        int temp = command_num;
+        while (temp > 0) {
+            temp /= 10;
+            digits++;
+        }
+        printf(" %*d  %s", 3 - digits, history_index + command_num, command_history[i]);
+    }
+
+    return;
+}
+
+
 void test()
 {
     // code here
@@ -299,16 +451,17 @@ void test()
 
 int main()
 {
+    //startup();
     chdir(getenv("HOME"));
 
     // ASCII text art
-    printf(GREEN"           _                    _          _ _ \n"
+    /*printf(GREEN"           _                    _          _ _ \n"
             " _ __ ___ (_) ___ _ __ ___  ___| |__   ___| | |\n"
             "| '_ ` _ \\| |/ __| '__/ _ \\/ __| '_ \\ / _ \\ | |\n"
             "| | | | | | | (__| | | (_) \\__ \\ | | |  __/ | |\n"
             "|_| |_| |_|_|\\___|_|  \\___/|___/_| |_|\\___|_|_|\n\n"RESET
             "code by: Wojciech Kubicki\n"
-            "Use the "COMMAND_COLOR"help"RESET", command to view more information about the project.\n\n");
+            "Use the "COMMAND_COLOR"help"RESET", command to view more information about the project.\n\n");*/
 
     char cwd[PATH_MAX];
 	char command[PATH_MAX];
@@ -317,18 +470,19 @@ int main()
 
     char *login = getenv("USER");
     char *host = getenv("NAME");  // Ubuntu doesn't have HOST variable in env, uses 'NAME' instead. Grep returns 'NAME={machine_name}' when searching for machine name.
+    char *home = getenv("HOME");
 
     getcwd(previous_directory, sizeof(previous_directory));
 
 	while(1)
 	{
         // Replacing HOME path in cwd variable with '~' symbol.
-        if (strstr(getcwd(cwd, sizeof(cwd)), getenv("HOME")) != NULL) {
+        if (strstr(getcwd(cwd, sizeof(cwd)), home) != NULL) {
             // write here explenation for below code {https://www.youtube.com/watch?v=0qSU0nxIZiE}
             // First step: get pointer to begining of searched substring in string
             // Second step: move characters from string to 'left' or 'right' depending on if inserted substring is smaller or larger than original substring
             // Third step: 
-            memmove(cwd + strlen("~"), cwd + strlen(getenv("HOME")), strlen(cwd) - strlen(getenv("HOME")) + 1);
+            memmove(cwd + strlen("~"), cwd + strlen(home), strlen(cwd) - strlen(home) + 1);
             memcpy(cwd, "~", strlen("~"));  // Using strcpy() inserts '/0' after inserted substring.
         }
 
@@ -339,6 +493,7 @@ int main()
         // Gets user input.
 		fgets(command, sizeof(command), stdin);
         if (strcmp(command, "\n") != 0) {  // Skip empty input.
+            save_history(command);
             // Tokenizing string into paramaters.
             paramater_count = 0;
             char *token = strtok(command, " \n");  // TO ADD: Read all spaces in between quotes.
@@ -366,16 +521,16 @@ int main()
             cd(paramater[1]);
         }
         else if (strcmp(paramater[0], "mv") == 0) {
-            mv(paramater[1], paramater[2]);
+            move(paramater[1], paramater[2]);
         }
-        else if (strcmp(paramater[0], "tree") == 0) {
+        else if (strcmp(paramater[0], "tree!") == 0) {
             tree(".", 0);
         }
         else if (strcmp(paramater[0], "clear") == 0) {
             clear();
         }
-        else if (strcmp(paramater[0], "test") == 0) {
-            test();
+        else if (strcmp(paramater[0], "history") == 0) {
+            list_history();
         }
 		else {  // If entered command isn't implemented in program, run the bash command.
             if (fork() == 0) {
