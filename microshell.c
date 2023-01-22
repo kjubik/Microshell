@@ -84,12 +84,25 @@ char* replace_symbol(char *path, char *symbol, char *replacement)
     return path;
 }
 
-/*
-char *relative_to_absolute(char *path)
-{
 
+char *relative_to_absolute(char *cwd, char *relative_path)
+{
+    char* absolute_path = malloc(PATH_MAX); // allocate memory for the absolute path
+    strcpy(absolute_path, cwd); // copy current working directory to the absolute path
+
+    char* token = strtok(relative_path, "/");
+    while (token != NULL) {
+        if (strcmp(token, "..") == 0) {
+            
+        }
+        else {
+
+        }
+    }
+
+    return absolute_path;
 }
-*/
+
 
 
 int check_file_type(char *path)
@@ -174,15 +187,14 @@ void move_directory(char *destination)
 
 
  // todo - if (strstr(source, "~") == 0) strcpy(source, getenv("HOME"));
-void mv(char *source_short_memory, char *destination_short_memory)  
+void mv(char *source_no_malloc, char *destination_no_malloc)  
 {
     // copies paramaters passed into function into strings with larger memory allocation  - fixed truncation when replacing '~' with full path in replace_symbol
-    char source[PATH_MAX];
-    //char *source = malloc(PATH_MAX);
-    strcpy(source, source_short_memory);
+    char *source = malloc(PATH_MAX);
+    strcpy(source, source_no_malloc);
 
-    char destination[PATH_MAX];
-    strcpy(destination, destination_short_memory);
+    char *destination = malloc(PATH_MAX);
+    strcpy(destination, destination_no_malloc);
 
     // modifies paths containing "~" and/or "." with full path names <- without this opening files wasn't handled properly
     char cwd[PATH_MAX];
@@ -191,12 +203,9 @@ void mv(char *source_short_memory, char *destination_short_memory)
     strcpy(source, replace_symbol(source, ".", cwd));
     strcpy(destination, replace_symbol(destination, "~", getenv("HOME")));
     strcpy(destination, replace_symbol(destination, ".", cwd));
-
     // checks if path is valid for paths requiring relative navigating using '..'
-    /*
-    if (strstr(source, "..")) source = relative_to_absolute(source);
-    if (strstr(destination, "..")) destination = relative_to_absolute(destination);
-    */
+    if (strstr(source, "..")) strcpy(source, relative_to_absolute(cwd, source));
+    if (strstr(destination, "..")) strcpy(destination, relative_to_absolute(cwd, destination));
 
     int source_type = check_file_type(source), destination_type = check_file_type(destination);
 
