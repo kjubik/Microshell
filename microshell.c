@@ -346,7 +346,7 @@ void move(char *source_no_malloc, char *destination_no_malloc)
         move_file(source, destination);
         return;
     }
-    else if (source_type == DIRECTORY /*&& destination_type == DIRECTORY*/)  {
+    else if (source_type == DIRECTORY && destination_type == DIRECTORY)  {
         printf("directory -> directory\n");
 
         char filename[PATH_MAX];
