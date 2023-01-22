@@ -2,7 +2,6 @@
 Project resembling Linux terminal. Created for Operating Systems class during 1st semester of Computer Science undergraduate programme.
 
 # Project requirements
-Program can only be written in C without using any system calls.
 
 - display a prompt of the form [{path}] $, where {path} is the path to the current working directory
 - handle 'cd' command, which works similarly to the 'cd' known from the bash shell
