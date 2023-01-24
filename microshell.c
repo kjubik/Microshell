@@ -9,7 +9,10 @@
 #include <errno.h>
 #include <time.h>
 #include <sys/ioctl.h>          // terminal window size
+#include <math.h>
+#include <pwd.h>                // getpwuid()
 
+char current_working_directory[PATH_MAX];
 char previous_directory[PATH_MAX];
 
 // colors
@@ -32,9 +35,11 @@ char previous_directory[PATH_MAX];
 #define ANIMATION 100000
 
 // history function variables
-#define HISTORY_LIMIT 1000
-char command_history[HISTORY_LIMIT][1024];
+#define HISTORY_LIMIT 99
+char command_history[HISTORY_LIMIT][256];
 int history_index = 0;
+int total_commands = 0;
+int index_shift = 0;
 
 
 void ring() {
@@ -67,32 +72,29 @@ void startup()
 
 void help()
 {
-	printf("\n"
-            "----------------------\n"
-            "Author: Wojciech Kubicki\n"
-            "----------------------\n"
+	printf("\nAuthor:\n"
+            "Wojciech Kubicki\n\n"
             "Implemented commands:\n"
             COMMAND_COLOR"cd"RESET" - change current working directory\n"
             COMMAND_COLOR"clear"RESET" - clear the terminal screen\n"
             COMMAND_COLOR"exit"RESET" - terminate program\n"
             COMMAND_COLOR"help"RESET" - display commands and project specification\n"
-            COMMAND_COLOR"history"RESET" - list previously entered commands\n"
+            COMMAND_COLOR"ls"RESET" - list directory contents\n"
+            "-a | -A | -g | -G | -h | -i | -l | -p | -Q | -1\n"
             COMMAND_COLOR"mv"RESET" - move (rename) files\n"
-            COMMAND_COLOR"tree"RESET" - list contents of directories in a tree-like format.\n"
-            "----------------------\n"
-            "Other features:\n"
-            "- custom startup animation\n"
-            "- display user login and host name\n"
+            "file -> file | file -> directory | directory -> directory (recursively)\n\n"
+            "Bonus features:\n"
+            "- custom startup animation [COMING SOON]\n"
+            "- user login and host name\n"
+            "- shortened home directory path\n"
             "- color coded text\n"
-            "- sound alert for errors\n"
-            "----------------------\n"
-            "\n");
+            "- sound alert for errors [COMING SOON]\n\n");
 
     return;
 }
 
 
-void cd(char *destination)
+void change_directory(char *destination)
 {
     // Saves current working directory for updating previous_directory later.
     char temp_directory[PATH_MAX];
@@ -121,11 +123,37 @@ void cd(char *destination)
 
 // below functions are used for mv()
 
-char* replace_symbol(char *path, char *symbol, char *replacement)
+char *replace_symbol(char *path, char *target, char *replacement)
 {
-    while (strstr(path, symbol) != NULL) {
-        memmove(path + strlen(replacement), path + strlen(symbol), strlen(path) - strlen(symbol) + 1);
+    // write here explenation for below code {https://www.youtube.com/watch?v=0qSU0nxIZiE}
+    // First step: get pointer to begining of searched substring in string
+    // Second step: move characters from string to 'left' or 'right' depending on if inserted substring is smaller or larger than original substring
+    // Third step: 
+    while (strstr(path, target) != NULL) {
+        memmove(path + strlen(replacement), path + strlen(target), strlen(path) - strlen(target) + 1);
         memcpy(path, replacement, strlen(replacement));  // Using strcpy() inserts '/0' after inserted substring.
+    }
+
+    return path;
+}
+
+
+char* replace_symbols(char *path)
+{
+    if (strcmp(path, ".") == 0) {
+        getcwd(current_working_directory, sizeof(current_working_directory));
+        return current_working_directory;
+    }
+    else if (strcmp(path, "~")== 0) {
+        return getenv("HOME");
+    }
+    else if (strcmp(path, "..") == 0) {
+        // code here
+    }
+    else {
+        getcwd(current_working_directory, sizeof(current_working_directory));
+        strcpy(path, replace_symbol(path, "./", strcat(current_working_directory, "/")));
+        strcpy(path, replace_symbol(path, "~/", strcat(getenv("HOME"), "/")));
     }
 
     return path;
@@ -291,7 +319,7 @@ void move_directory(char *source, char *filename, char *destination)
 
 void move(char *source_no_malloc, char *destination_no_malloc)  
 {
-    // copies paramaters passed into function into strings with larger memory allocation  - fixed truncation when replacing '~' with full path in replace_symbol
+    // copies paramaters passed into function into strings with larger memory allocation  - fixed truncation when replacing '~' with full path in replace_symbols
     char *source = malloc(PATH_MAX);
     strcpy(source, source_no_malloc);
 
@@ -301,10 +329,10 @@ void move(char *source_no_malloc, char *destination_no_malloc)
     // modifies paths containing "~" and/or "." with full path names <- without this opening files wasn't handled properly
     char cwd[PATH_MAX];
     getcwd(cwd, sizeof(cwd));
-    strcpy(source, replace_symbol(source, "~", getenv("HOME")));
-    strcpy(source, replace_symbol(source, ".", cwd));
-    strcpy(destination, replace_symbol(destination, "~", getenv("HOME")));
-    strcpy(destination, replace_symbol(destination, ".", cwd));
+
+    strcpy(source, replace_symbols(source));  // This is retarted. Files with extenstions ({filename}.{ext}) are unusable, because "." gets replaced with CWD
+    strcpy(destination, replace_symbols(destination));  // Same as above. This is retarted.
+
     // THIS PART DOESN'T WORK RIGHT NOW. And I'll probably leave it as is. Too much work rewriting previous code
     // checks if path is valid for paths requiring relative navigating using '..'
     //if (strstr(source, "..")) strcpy(source, relative_to_absolute(cwd, source));
@@ -346,25 +374,46 @@ void move(char *source_no_malloc, char *destination_no_malloc)
         move_file(source, destination);
         return;
     }
-    else if (source_type == DIRECTORY && destination_type == DIRECTORY)  {
+    else if (source_type == DIRECTORY /*&& destination_type == DIRECTORY*/)  {
         printf("directory -> directory\n");
 
-        char filename[PATH_MAX];
-        extract_filename(source, filename);
+        char source_filename[PATH_MAX];
+        extract_filename(source, source_filename);
 
-        // checks if 
-        /*struct stat directory;
-        if (stat(destination, &directory) == -1) {
-            if (chdir() == NULL) {
-                perror("chdir failed");
-                return;
+        struct stat phantom_directory;
+
+        if (stat(destination, &phantom_directory) == -1) {
+            char penultimate_path[PATH_MAX];
+            strcpy(penultimate_path, destination);
+
+            if (strrchr(penultimate_path, '/') != NULL) {
+                char *last_slash = strrchr(penultimate_path, '/');
+                if (last_slash != NULL) {
+                    *last_slash = '\0';
+                    
+                    if (stat(penultimate_path, &phantom_directory) == -1) {
+                        perror("no directory like this boy");
+                        return;
+                    }
+                    else {
+                        // move the source directory to the penultimate_path under a new name 
+                        // as declared by the last directory in the destination path
+                        char destination_filename[PATH_MAX];
+                        extract_filename(destination, destination_filename);
+
+                        move_directory(source, destination_filename, penultimate_path);
+                    }
+                }
             }
-            mkdir();
-            chdir();
-        }*/
+            else {
+                // if the destination doesn't contain a '/', 
+                // then the source is moved to the current directory under a new name
+                move_directory(source, destination, cwd);
+            }
+        }
 
         // make directory in destination
-        move_directory(source, filename, destination);
+        move_directory(source, source_filename, destination);
         return;
     }
     else {
@@ -376,19 +425,233 @@ void move(char *source_no_malloc, char *destination_no_malloc)
 }
 
 
-void ls()
+void list_files(char *arguments, char *location)
 {
-    /* code here */
-    printf("ls\n");
+    // Allocates memory for path
+    char *path = malloc(PATH_MAX);
+    strcpy(path, location);
+    strcat(path, "/");
+    strcpy(path, replace_symbol(path, "~/", strcat(getenv("HOME"), "/")));
+    
+    DIR* directory = opendir(path);
+    if (directory == NULL) {
+        printf("%s - ", path);
+        perror("ls");
+        return;
+    }
 
-    return;
-}
+    long int total_size = 0;
 
+    // -R  list subdirectories recursively
+    if (strchr(arguments, 'R')) {
+        printf("%s:\n", path);
+    }
 
-void tree(char *path, int indentlevel)
-{
-    /* code here */
-    printf("tree\n");
+    // reading every file in directory
+    struct dirent *entry;
+    while ((entry = readdir(directory)) != NULL) {
+        // arguments applied before display
+        char name[PATH_MAX];
+        strcpy(name, entry->d_name);
+
+        struct stat file_st;
+        stat(name, &file_st);
+
+        // last argument 'overwrites' the other one.
+        // if -aA is passed, then "." and ".." are ignored
+        // if -Aa is passed, then "." and ".." are displayed
+        if (strchr(arguments, 'a') && strchr(arguments, 'A')) {
+            if (strchr(arguments, 'a') < strchr(arguments, 'A')) {
+                if (name[0] == '.')
+                continue;
+            }
+            else {
+
+            }
+        }
+        else {
+            // -a  do not ignore entries starting with .
+            if (!strchr(arguments, 'a')) {
+                if (name[0] == '.')
+                    continue;
+            }
+            // -A  do not list implied . and ..
+            if (strchr(arguments, 'A')) {
+                if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, ".."))
+                    continue;
+            }
+        }
+
+        // -i  print the index number of each file
+        if (strchr(arguments, 'i')) {
+            printf("%ld ", entry->d_ino);
+        }
+
+        // -l  use a long listing format
+        // -g  like -l, but do not list owner
+        if (strchr(arguments, 'l') || strchr(arguments, 'g')) {
+
+            if (S_ISDIR(file_st.st_mode)) printf("d");
+            else printf("-");
+            if (file_st.st_mode & S_IRUSR) printf("r");
+            else printf("-");
+            if (file_st.st_mode & S_IWUSR) printf("w");
+            else printf("-");
+            if (file_st.st_mode & S_IXUSR) printf("x");
+            else printf("-");
+            if (file_st.st_mode & S_IRGRP) printf("r");
+            else printf("-");
+            if (file_st.st_mode & S_IWGRP) printf("w");
+            else printf("-");
+            if (file_st.st_mode & S_IXGRP) printf("x");
+            else printf("-");
+            if (file_st.st_mode & S_IROTH) printf("r");
+            else printf("-");
+            if (file_st.st_mode & S_IWOTH) printf("w");
+            else printf("-");
+            if (file_st.st_mode & S_IXOTH) printf("x");
+            else printf("-");
+            printf(" ");
+
+            printf("%ld ", file_st.st_nlink);
+
+            if (!strchr(arguments, 'g')) {
+                struct passwd *userid = getpwuid(file_st.st_uid);
+                printf("%s ", userid->pw_name);
+            }
+
+            if (!strchr(arguments, 'G')) {
+                struct passwd *groupid = getpwuid(file_st.st_gid);
+                printf("%s ", groupid->pw_name);
+            }
+
+            printf("%ld ", file_st.st_size);
+            total_size += file_st.st_size;
+
+            // https://man7.org/linux/man-pages/man3/ctime.3.html
+            // https://www.ibm.com/docs/en/i/7.3?topic=functions-ctime-convert-time-character-string
+            // st_atime (access time) = when was it opened last as "r"
+            // st_mtime (modification time) = when was it opened last as "a" or "w"
+            // st_ctime (change mode time) = when was chmod() called on it last <- closest to time of creation
+            struct tm *time_st = localtime(&file_st.st_ctime);  // no st_birthtime member, had to use st_ctime - Linux doesn't support it? Seems that only MacOS does :(
+            char month[4];
+            strftime(month, sizeof(month), "%m", time_st);
+            if (strcmp(month, "01") == 0) {
+                strcpy(month, "Jan");
+            }
+            else if (strcmp(month, "02") == 0) {
+                strcpy(month, "Feb");
+            }
+            else if (strcmp(month, "03") == 0) {
+                strcpy(month, "Mar");
+            }
+            else if (strcmp(month, "04") == 0) {
+                strcpy(month, "Apr");
+            }
+            else if (strcmp(month, "05") == 0) {
+                strcpy(month, "May");
+            }
+            else if (strcmp(month, "06") == 0) {
+                strcpy(month, "Jun");
+            }
+            else if (strcmp(month, "07") == 0) {
+                strcpy(month, "Jul");
+            }
+            else if (strcmp(month, "08") == 0) {
+                strcpy(month, "Aug");
+            }
+            else if (strcmp(month, "09") == 0) {
+                strcpy(month, "Sep");
+            }
+            else if (strcmp(month, "10") == 0) {
+                strcpy(month, "Oct");
+            }
+            else if (strcmp(month, "11") == 0) {
+                strcpy(month, "Nov");
+            }
+            else if (strcmp(month, "12") == 0) {
+                strcpy(month, "Dec");
+            }
+            char time_tail[256];
+            strftime(time_tail, sizeof(time_tail), " %d %H:%M", time_st);
+            strcat(month, time_tail);
+            printf("%s ", month);
+        }
+
+        // -Q  enclose entry names in double quotes
+        if (strchr(arguments, 'Q')) {
+            printf("\"");
+        }
+
+        // prints entry in directory
+        if (entry->d_type == DT_DIR) {  // file is a directory
+            printf(BLUE"%s"RESET, entry->d_name);
+        }
+        else if (entry->d_type == DT_REG) {  // file is a regular file
+            // regfile variable created so that path to file can be passed in stat()
+            char regfile[PATH_MAX];
+            strcpy(regfile, path);
+            strcat(regfile, "/");
+            strcat(regfile, entry->d_name);
+
+            struct stat filestat;
+
+            if (stat(regfile, &filestat) == 0 && filestat.st_mode & S_IXUSR) {  // regular file is an executable
+                printf(GREEN"%s"RESET, entry->d_name);
+            }
+            else {  // regular file without execute permission
+                printf("%s", entry->d_name);
+            }
+        }
+
+        // arguments applied after file has been display
+
+        // -Q  enclose entry names in double quotes
+        if (strchr(arguments, 'Q')) {
+            printf("\"");
+        }
+
+        // -p  append / indicator to directories
+        if (strchr(arguments, 'p') && entry->d_type == DT_DIR) {
+            printf("/");
+        }
+
+        printf("  ");
+
+        // -1  list one file per line.
+        if (strchr(arguments, '1') || strchr(arguments, 'l') || strchr(arguments, 'g')) {
+            printf("\n");
+        }
+
+    }
+
+    if (!(strchr(arguments, '1') || strchr(arguments, 'l') || strchr(arguments, 'g'))) 
+        printf("\n");
+
+    closedir(directory);
+
+    if (strchr(arguments, 'l')) {
+        printf("total %ld\n", total_size);
+    }
+
+    if (strchr(arguments, 'R')) {
+        DIR* directory = opendir(path);
+        if (directory == NULL) {
+            perror("ls");
+            return;
+        }
+
+        while ((entry = readdir(directory)) != NULL) {
+            if (entry->d_type == DT_DIR && entry->d_name[0] != '.') {  // directories with "." would casue problem on Ubuntu VM on home workstation
+                char child_path[PATH_MAX];
+                strcpy(child_path, path);
+                strcat(child_path, entry->d_name);
+                printf("\n");
+                list_files(arguments, child_path);
+            }
+        }
+        closedir(directory);
+    }
 
     return;
 }
@@ -406,12 +669,14 @@ command_history = list containing entered commands
 command_count = number of lines to print out */
 void save_history(char *command) 
 {
+    total_commands++;
     if (history_index == HISTORY_LIMIT) {
-        // Overwrite the first command with the last one
+        // removes the first command saved and moves each next command to the previous index
         for (int i = 0; i < HISTORY_LIMIT - 1; i++) {
             strcpy(command_history[i], command_history[i + 1]);
         }
         history_index--;
+        index_shift++;
     }
     strcpy(command_history[history_index], command);
     history_index++;
@@ -422,11 +687,7 @@ void save_history(char *command)
 
 void list_history() 
 {
-    int command_count;
-    if (history_index > HISTORY_LIMIT) command_count = HISTORY_LIMIT;
-    else command_count = history_index;
-
-    for (int i = 0; i < command_count; i++) {
+    for (int i = 0; i < history_index; i++) {
         int command_num = i + 1;
         int digits = 0;
         int temp = command_num;
@@ -434,18 +695,25 @@ void list_history()
             temp /= 10;
             digits++;
         }
-        printf(" %*d  %s", 3 - digits, history_index + command_num, command_history[i]);
+        printf(" %*d  %s", digits, total_commands - (total_commands - i) + 1 + index_shift, command_history[i]);
     }
 
     return;
 }
 
+/*
+ ______   ______     ______     ______  
+/\__  _\ /\  ___\   /\  ___\   /\__  _\ 
+\/_/\ \/ \ \  __\   \ \___  \  \/_/\ \/ 
+   \ \_\  \ \_____\  \/\_____\    \ \_\ 
+    \/_/   \/_____/   \/_____/     \/_/ 
+                                       
+               T  E  S  T
+*/
 
 void test()
 {
-    // code here
-    
-    return;
+
 }
 
 
@@ -476,15 +744,8 @@ int main()
 
 	while(1)
 	{
-        // Replacing HOME path in cwd variable with '~' symbol.
-        if (strstr(getcwd(cwd, sizeof(cwd)), home) != NULL) {
-            // write here explenation for below code {https://www.youtube.com/watch?v=0qSU0nxIZiE}
-            // First step: get pointer to begining of searched substring in string
-            // Second step: move characters from string to 'left' or 'right' depending on if inserted substring is smaller or larger than original substring
-            // Third step: 
-            memmove(cwd + strlen("~"), cwd + strlen(home), strlen(cwd) - strlen(home) + 1);
-            memcpy(cwd, "~", strlen("~"));  // Using strcpy() inserts '/0' after inserted substring.
-        }
+        getcwd(cwd, sizeof(cwd));
+        strcpy(cwd, replace_symbol(cwd, getenv("HOME"), "~"));  // after using move() function cwd gets printed as envvar HOME. why does this happen?
 
         // Printing user, host name and current working directory.
         // [user@host:cwd]$ 
@@ -518,16 +779,31 @@ int main()
             if (paramater_count == 1) {
                 paramater[1] = "~";
             }
-            cd(paramater[1]);
+            change_directory(paramater[1]);
         }
-        else if (strcmp(paramater[0], "mv") == 0) {
+        else if (strcmp(paramater[0], "mv") == 0) {  // after running mv function once (eg. mv alpha omega) printing cwd with ~ doesn't work. why?
             move(paramater[1], paramater[2]);
         }
-        else if (strcmp(paramater[0], "tree!") == 0) {
-            tree(".", 0);
+        else if (strcmp(paramater[0], "test") == 0) {
+            test();
         }
         else if (strcmp(paramater[0], "clear") == 0) {
             clear();
+        }
+        else if (strcmp(paramater[0], "ls") == 0) {
+            char location[PATH_MAX] = ".";
+            char arguments[20] = "";
+
+            for (int i = 1; i < paramater_count; i++) {
+                if (paramater[i][0] == '-') {
+                    strcat(arguments, paramater[i]);
+                }
+                else {
+                    strcpy(location, paramater[i]);
+                }
+            }
+
+            list_files(arguments, location);
         }
         else if (strcmp(paramater[0], "history") == 0) {
             list_history();
