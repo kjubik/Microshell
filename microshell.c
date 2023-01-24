@@ -39,7 +39,7 @@ char previous_directory[PATH_MAX];
 char command_history[HISTORY_LIMIT][256];
 int history_index = 0;
 int total_commands = 0;
-int index_shift = 1;
+int index_shift = 0;
 
 
 void ring() {
@@ -48,23 +48,75 @@ void ring() {
     return;
 }
 
+
+
+void clear()
+{
+    printf("\033c");
+    return;
+}
+
+
 void startup()
 {
-    chdir(getenv("HOME"));
+    clear();
+    
+    struct winsize window; // https://stackoverflow.com/questions/18878141/difference-between-structures-ttysize-and-winsize
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &window);
+    int width = window.ws_col;
+    int height = window.ws_row;
 
-    struct winsize w;
-    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-    int width = w.ws_col;
+    printf("\033[?25l");  // hide text cursor
 
-    printf("Loading |");
-    for (int i = 0; i < (width-16); i++) {
+    //single line of 'Nostromoshell' is 72 characters.
+    int align_nostromoshell = (width-72)/2;
+
+    // printing 'Nostromoshell'
+    // ASCII text - font 'Big' - https://textkool.com
+    printf("\n");
+    printf(GREEN);
+printf("%*s _   _           _                                 _          _ _ \n", align_nostromoshell, "");
+printf("%*s| \\ | |         | |                               | |        | | |\n", align_nostromoshell, "");
+printf("%*s|  \\| | ___  ___| |_ _ __ ___  _ __ ___   ___  ___| |__   ___| | |\n", align_nostromoshell, "");
+printf("%*s| . ` |/ _ \\/ __| __| '__/ _ \\| '_ ` _ \\ / _ \\/ __| '_ \\ / _ \\ | |\n", align_nostromoshell, "");
+printf("%*s| |\\  | (_) \\__ \\ |_| | | (_) | | | | | | (_) \\__ \\ | | |  __/ | |\n", align_nostromoshell, "");
+printf("%*s|_| \\_|\\___/|___/\\__|_|  \\___/|_| |_| |_|\\___/|___/_| |_|\\___|_|_|\n\n", align_nostromoshell, "");
+    printf(RESET);
+
+    // printing Weyland-Yutani Corporation
+    int align_WY = (width-55)/2;
+    printf("%*sW E Y L A N D - Y U T A N I  C O R P O R A T I O N\n", align_WY, "");
+
+    // spacing loading bar from header
+    int align_bar = (height-9)-6;
+    for (int l = 0; l < align_bar; l++) {
+        printf("\n");
+    }
+
+    // printing 
+    int align_loading = (width-25)/2;
+    printf("%*sinitializing systems...\n\n", align_loading, "");
+
+    // printing laoding bar
+    printf(GREEN);
+    int bar_size = 72;
+    printf("%*s", (width-bar_size)/2, "");
+    for (int i = 0; i < bar_size; i++) {
         printf("█");
         fflush(stdout);
-        usleep(10000);
+        usleep(30000);
     }
-    printf("| Done!\n");
-    printf("Use the "COMMAND_COLOR"help"RESET", command to view more information about the project.\n\n");
-    sleep(2);
+    printf(RESET);
+
+    printf("\n\n");
+
+    sleep(1);
+    printf("%*sboot successful\n", (width-20)/2, "");
+    sleep(1);
+
+    clear();
+
+    printf("Use the "COMMAND_COLOR"help"RESET" command to view commands and project specification.\n\n");
 
     return;
 }
@@ -72,23 +124,38 @@ void startup()
 
 void help()
 {
-	printf("\nAuthor:\n"
-            "Wojciech Kubicki\n\n"
-            "Implemented commands:\n"
+	printf("\n"
+            "IMPLEMENTED COMMANDS:\n"
             COMMAND_COLOR"cd"RESET" - change current working directory\n"
             COMMAND_COLOR"clear"RESET" - clear the terminal screen\n"
             COMMAND_COLOR"exit"RESET" - terminate program\n"
-            COMMAND_COLOR"help"RESET" - display commands and project specification\n"
+            COMMAND_COLOR"help"RESET" - display implemented commands and project specification\n"
+            COMMAND_COLOR"history"RESET" - display previously entered commands\n"
             COMMAND_COLOR"ls"RESET" - list directory contents\n"
-            "| -a | -g | -G | -i | -l | -p | -Q | -1 |\n"
+            //"| -a | -g | -G | -i | -l | -p | -Q | -1 |\n"
+            "  -a  do not ignore entries starting with .\n"
+            "  -g  like -l, but do not list owner\n"
+            "  -G  in a long listing, don't print group names\n"
+            "  -i  print the index number of each file\n"
+            "  -l  use a long listing format\n"
+            "  -p  append / indicator to directories\n"
+            "  -Q  enclose entry names in double quotes\n"
+            "  -1  list one file per line.\n"
             COMMAND_COLOR"mv"RESET" - move (rename) files\n"
-            "file -> file | file -> directory | directory -> directory (recursively)\n\n"
-            "Bonus features:\n"
-            "- custom startup animation [COMING SOON]\n"
+            //"file -> file | file -> directory | directory -> directory (recursively)\n\n"
+            "  Usage: mv SOURCE DEST\n"
+            "  Rename SOURCE to DEST, or move SOURCE to DIRECTORY.\n"
+            "\n"
+            "BONUS FEATURES:\n"
+            "- custom startup animation\n"
             "- user login and host name\n"
             "- shortened home directory path\n"
             "- color coded text\n"
-            "- sound alert for errors [COMING SOON]\n\n");
+            "- sound alert for errors\n"
+            "\n"
+            "CODE BY:\n"
+            "Wojciech Kubicki\n"
+            "\n");
 
     return;
 }
@@ -110,6 +177,7 @@ void change_directory(char *destination)
     }
     else {
         if(chdir(destination) != 0){
+            ring();
             printf("-bash: cd: %s: No such file or directory\n", destination);
         }
     }
@@ -125,10 +193,6 @@ void change_directory(char *destination)
 
 char *replace_symbol(char *path, char *target, char *replacement)
 {
-    // write here explenation for below code {https://www.youtube.com/watch?v=0qSU0nxIZiE}
-    // First step: get pointer to begining of searched substring in string
-    // Second step: move characters from string to 'left' or 'right' depending on if inserted substring is smaller or larger than original substring
-    // Third step: 
     while (strstr(path, target) != NULL) {
         memmove(path + strlen(replacement), path + strlen(target), strlen(path) - strlen(target) + 1);
         memcpy(path, replacement, strlen(replacement));  // Using strcpy() inserts '/0' after inserted substring.
@@ -161,6 +225,7 @@ char* replace_symbols(char *path)
 }
 
 
+// don't use this code, haven't implemented navigating relative paths with ../
 char *relative_to_absolute(char *cwd, char *relative_path)
 {
     char *absolute_path = malloc(PATH_MAX); // allocate memory for the absolute path
@@ -226,6 +291,7 @@ void move_file(char *source, char *destination)
     FILE *source_file;
     source_file = fopen(source, "r");
     if (source_file == NULL) {
+        ring();
         perror(source);
         return;
     }
@@ -233,7 +299,8 @@ void move_file(char *source, char *destination)
     FILE *destination_file;
     destination_file = fopen(destination, "w");
     if (destination_file == NULL) {
-        perror("Error opening file for writing");
+        ring();
+        perror("cannot move file: error opening file for writing");
         return;
     }
 
@@ -253,6 +320,7 @@ void move_directory(char *source, char *filename, char *destination)
 {
     DIR *directory = opendir(source);
     if (directory == NULL) {
+        ring();
         perror("move_directory");
         return;
     }
@@ -312,7 +380,6 @@ void move_directory(char *source, char *filename, char *destination)
     }
     closedir(directory);
 
-    // removes the directory after copying
     rmdir(source);
     return;
 }
@@ -346,6 +413,7 @@ void move(char *source_no_malloc, char *destination_no_malloc)
         struct stat file1, file2;
 
         if (stat(source, &file1) == -1) {
+            ring();
             perror(source);
             return;
         }
@@ -356,7 +424,8 @@ void move(char *source_no_malloc, char *destination_no_malloc)
             move_file(source, destination);
         }
         else {
-            printf("mv:"RED" '%s' and '%s' are the same file\n"RESET, source, destination);
+            ring();
+            printf("mv:'%s' and '%s' are the same file\n", source, destination);
             return;
         }
     }
@@ -393,7 +462,8 @@ void move(char *source_no_malloc, char *destination_no_malloc)
                     *last_slash = '\0';
                     
                     if (stat(penultimate_path, &phantom_directory) == -1) {
-                        perror("no directory like this boy");
+                        ring();
+                        perror(penultimate_path);
                         return;
                     }
                     else {
@@ -418,6 +488,7 @@ void move(char *source_no_malloc, char *destination_no_malloc)
         return;
     }
     else {
+        ring();
         printf("mv: source and destination types are incompatible\n");
         return;
     }
@@ -439,7 +510,7 @@ void list_files(char *arguments, char *location)
     
     DIR* directory = opendir(path);
     if (directory == NULL) {
-        printf("%s - ", path);
+        ring();
         perror("ls");
         return;
     }
@@ -623,6 +694,7 @@ void list_files(char *arguments, char *location)
     if (strchr(arguments, 'R')) {
         DIR* directory = opendir(path);
         if (directory == NULL) {
+            ring();
             perror("ls");
             return;
         }
@@ -639,13 +711,6 @@ void list_files(char *arguments, char *location)
         closedir(directory);
     }
 
-    return;
-}
-
-
-void clear()
-{
-    printf("\033c");
     return;
 }
 
@@ -673,15 +738,20 @@ void save_history(char *command)
 
 void list_history() 
 {
-    for (int i = 1; i < history_index+1; i++) {
-        int digits = 0;
-        int temp = i;
-        while (temp > 0) {
-            temp /= 10;
-            digits++;
+    if (history_index < 10) {
+        for (int i = 0; i < history_index; i++) {
+            printf(" %d  %s", i + index_shift + 1, command_history[i]);
         }
-        printf(" %*d  %s", digits, i + index_shift, command_history[i]);
     }
+    else {
+        for (int i = 0; i < 9; i++) {
+            printf("  %d  %s", i + index_shift + 1, command_history[i]);
+        }
+        for (int i = 9; i < history_index; i++) {
+            printf(" %d  %s", i + index_shift + 1, command_history[i]);
+        }
+    }
+    
 
     return;
 }
@@ -692,17 +762,8 @@ void fix_home_env();
 
 int main()
 {
-    //startup();
+    startup();
     chdir(getenv("HOME"));
-
-    // ASCII text art
-    /*printf(GREEN"           _                    _          _ _ \n"
-            " _ __ ___ (_) ___ _ __ ___  ___| |__   ___| | |\n"
-            "| '_ ` _ \\| |/ __| '__/ _ \\/ __| '_ \\ / _ \\ | |\n"
-            "| | | | | | | (__| | | (_) \\__ \\ | | |  __/ | |\n"
-            "|_| |_| |_|_|\\___|_|  \\___/|___/_| |_|\\___|_|_|\n\n"RESET
-            "code by: Wojciech Kubicki\n"
-            "Use the "COMMAND_COLOR"help"RESET", command to view more information about the project.\n\n");*/
 
     char cwd[PATH_MAX];
 	char command[PATH_MAX];
@@ -745,7 +806,7 @@ int main()
             help();
 		} 
         else if ((strcmp(paramater[0],"exit") == 0) || (strcmp(paramater[0],"q") == 0)) {
-			printf("\nProgram zakonczony\n\n");
+            clear();
             exit(0);
         }
         else if (strcmp(paramater[0],"cd") == 0) {
@@ -756,12 +817,13 @@ int main()
         }
         else if (strcmp(paramater[0], "mv") == 0) {  // after running mv function once (eg. mv alpha omega) printing cwd with ~ doesn't work. why?
             if (paramater_count != 3) {
+                ring();
                 printf("mv: invalid number of arguments passed\n");
             }
             else move(paramater[1], paramater[2]);
         }
         else if (strcmp(paramater[0], "test") == 0) {
-            
+            ring();
         }
         else if (strcmp(paramater[0], "clear") == 0) {
             clear();
@@ -791,7 +853,10 @@ int main()
 			else {
 				int status = 0;
 				wait(&status);
-                if(status == 65280) printf("%s: command not found\n", paramater[0]);
+                if(status == 65280) {
+                    ring();
+                    printf("%s: command not found\n", paramater[0]);
+                }
 			}
         }
     }
