@@ -84,8 +84,11 @@ printf("%*s|_| \\_|\\___/|___/\\__|_|  \\___/|_| |_| |_|\\___/|___/_| |_|\\___|_
     printf(RESET);
 
     // printing Weyland-Yutani Corporation
-    int align_WY = (width-55)/2;
-    printf("%*sW E Y L A N D - Y U T A N I  C O R P O R A T I O N\n", align_WY, "");
+    printf("\033[1m");
+    char weyland_yutani[] = "W E Y L A N D - Y U T A N I  C O R P O R A T I O N";
+    int align_WY = (width-strlen(weyland_yutani))/2;
+    printf("%*s%s\n", align_WY, "", weyland_yutani);
+    printf("\033[0m");
 
     // spacing loading bar from header
     int align_bar = (height-9)-6;
@@ -94,8 +97,8 @@ printf("%*s|_| \\_|\\___/|___/\\__|_|  \\___/|_| |_| |_|\\___/|___/_| |_|\\___|_
     }
 
     // printing 
-    int align_loading = (width-25)/2;
-    printf("%*sinitializing systems...\n\n", align_loading, "");
+    int align_loading = (width-24)/2;
+    printf("%*sinitializing system...\n\n", align_loading, "");
 
     // printing laoding bar
     printf(GREEN);
@@ -110,11 +113,19 @@ printf("%*s|_| \\_|\\___/|___/\\__|_|  \\___/|_| |_| |_|\\___/|___/_| |_|\\___|_
 
     printf("\n\n");
 
-    sleep(1);
+    usleep(200000);
     printf("%*sboot successful\n", (width-20)/2, "");
     sleep(1);
 
     clear();
+
+    printf("property of\n"
+    "WEYLAND-YUTANI CORPORATION\n"
+    "\n"
+    "NAME: Nostromo\n"
+    "ID: 180924609\n"
+    "DEST: LV-426\n"
+    "\n");
 
     printf("Use the "COMMAND_COLOR"help"RESET" command to view commands and project specification.\n\n");
 
@@ -124,8 +135,7 @@ printf("%*s|_| \\_|\\___/|___/\\__|_|  \\___/|_| |_| |_|\\___/|___/_| |_|\\___|_
 
 void help()
 {
-	printf("\n"
-            "IMPLEMENTED COMMANDS:\n"
+	printf("IMPLEMENTED COMMANDS:\n"
             COMMAND_COLOR"cd"RESET" - change current working directory\n"
             COMMAND_COLOR"clear"RESET" - clear the terminal screen\n"
             COMMAND_COLOR"exit"RESET" - terminate program\n"
@@ -145,6 +155,7 @@ void help()
             //"file -> file | file -> directory | directory -> directory (recursively)\n\n"
             "  Usage: mv SOURCE DEST\n"
             "  Rename SOURCE to DEST, or move SOURCE to DIRECTORY.\n"
+            "  DIRECTORY moved/renamed recursively.\n"
             "\n"
             "BONUS FEATURES:\n"
             "- custom startup animation\n"
@@ -154,8 +165,21 @@ void help()
             "- sound alert for errors\n"
             "\n"
             "CODE BY:\n"
-            "Wojciech Kubicki\n"
-            "\n");
+            "Wojciech Kubicki\n");
+
+    return;
+}
+
+
+void crew()
+{
+    printf("032/V4-07C | Dallas, Arthur Coblenz - Captain\n"
+    "825/G9-01K | Kane, Gilbert Ward - Executive Officer\n"
+    "759/L2-01N | Ripley, Ellen Louis - Warrant Officer\n"
+    "111/C2/01X | Ash - Science Officer\n"
+    "971/L6-02P | Lambert, Joan Marie - Navigator\n"
+    "313/S4-08M | Parker, Denis Monroe - Chief Engineer\n"
+    "724/R4-06J | Brett, Samuel Elias - Engineering Technician\n");
 
     return;
 }
@@ -328,11 +352,8 @@ void move_directory(char *source, char *filename, char *destination)
     // creates new directory in destination
     char cwd[PATH_MAX];
     getcwd(cwd, sizeof(cwd));
-    printf("changing directory to: %s\n\n", destination);
     chdir(destination);
-    printf("making the new directory: %s\n\n", filename);
     mkdir(filename, 0777);
-    printf("changing directory back to: %s\n\n", cwd);
     chdir(cwd);
 
     // moves all children regular files and directories
@@ -355,10 +376,7 @@ void move_directory(char *source, char *filename, char *destination)
             strcat(new_destination, "/");
             strcat(new_destination, filename);
 
-            printf("new_source: %s\nnew_filename: %s\nnew_destination: %s\n", new_source, new_filename, new_destination);
-
             move_directory(new_source, new_filename, new_destination);
-            
         }
         else if (entry->d_type == DT_REG) {
             // moves file to directory
@@ -445,8 +463,6 @@ void move(char *source_no_malloc, char *destination_no_malloc)
         return;
     }
     else if (source_type == DIRECTORY /*&& destination_type == DIRECTORY*/)  {
-        printf("directory -> directory\n");
-
         char source_filename[PATH_MAX];
         extract_filename(source, source_filename);
 
@@ -827,6 +843,9 @@ int main()
         }
         else if (strcmp(paramater[0], "clear") == 0) {
             clear();
+        }
+        else if (strcmp(paramater[0], "crew") == 0) {
+            crew();
         }
         else if (strcmp(paramater[0], "ls") == 0) {
             char location[PATH_MAX] = ".";
