@@ -39,7 +39,7 @@ char previous_directory[PATH_MAX];
 char command_history[HISTORY_LIMIT][256];
 int history_index = 0;
 int total_commands = 0;
-int index_shift = 0;
+int index_shift = 1;
 
 
 void ring() {
@@ -80,7 +80,7 @@ void help()
             COMMAND_COLOR"exit"RESET" - terminate program\n"
             COMMAND_COLOR"help"RESET" - display commands and project specification\n"
             COMMAND_COLOR"ls"RESET" - list directory contents\n"
-            "-a | -A | -g | -G | -h | -i | -l | -p | -Q | -1\n"
+            "| -a | -g | -G | -i | -l | -p | -Q | -1 |\n"
             COMMAND_COLOR"mv"RESET" - move (rename) files\n"
             "file -> file | file -> directory | directory -> directory (recursively)\n\n"
             "Bonus features:\n"
@@ -153,7 +153,8 @@ char* replace_symbols(char *path)
     else {
         getcwd(current_working_directory, sizeof(current_working_directory));
         strcpy(path, replace_symbol(path, "./", strcat(current_working_directory, "/")));
-        strcpy(path, replace_symbol(path, "~/", strcat(getenv("HOME"), "/")));
+        char home[256];  // get stack smashing when sizeof(getenv("HOME")) <- why? works in list_files - probably because list_files calls this?
+        strcpy(path, replace_symbol(path, "~/", home));
     }
 
     return path;
@@ -431,7 +432,10 @@ void list_files(char *arguments, char *location)
     char *path = malloc(PATH_MAX);
     strcpy(path, location);
     strcat(path, "/");
-    strcpy(path, replace_symbol(path, "~/", strcat(getenv("HOME"), "/")));
+    char home[sizeof(getenv("HOME"))];
+    strcpy(home, getenv("HOME"));
+    strcat(home, "/");
+    strcpy(path, replace_symbol(path, "~/", home));
     
     DIR* directory = opendir(path);
     if (directory == NULL) {
@@ -457,30 +461,12 @@ void list_files(char *arguments, char *location)
         struct stat file_st;
         stat(name, &file_st);
 
-        // last argument 'overwrites' the other one.
-        // if -aA is passed, then "." and ".." are ignored
-        // if -Aa is passed, then "." and ".." are displayed
-        if (strchr(arguments, 'a') && strchr(arguments, 'A')) {
-            if (strchr(arguments, 'a') < strchr(arguments, 'A')) {
-                if (name[0] == '.')
+        // -a  do not ignore entries starting with .
+        if (!strchr(arguments, 'a')) {
+            if (name[0] == '.')
                 continue;
-            }
-            else {
-
-            }
         }
-        else {
-            // -a  do not ignore entries starting with .
-            if (!strchr(arguments, 'a')) {
-                if (name[0] == '.')
-                    continue;
-            }
-            // -A  do not list implied . and ..
-            if (strchr(arguments, 'A')) {
-                if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, ".."))
-                    continue;
-            }
-        }
+        
 
         // -i  print the index number of each file
         if (strchr(arguments, 'i')) {
@@ -687,34 +673,21 @@ void save_history(char *command)
 
 void list_history() 
 {
-    for (int i = 0; i < history_index; i++) {
-        int command_num = i + 1;
+    for (int i = 1; i < history_index+1; i++) {
         int digits = 0;
-        int temp = command_num;
+        int temp = i;
         while (temp > 0) {
             temp /= 10;
             digits++;
         }
-        printf(" %*d  %s", digits, total_commands - (total_commands - i) + 1 + index_shift, command_history[i]);
+        printf(" %*d  %s", digits, i + index_shift, command_history[i]);
     }
 
     return;
 }
 
-/*
- ______   ______     ______     ______  
-/\__  _\ /\  ___\   /\  ___\   /\__  _\ 
-\/_/\ \/ \ \  __\   \ \___  \  \/_/\ \/ 
-   \ \_\  \ \_____\  \/\_____\    \ \_\ 
-    \/_/   \/_____/   \/_____/     \/_/ 
-                                       
-               T  E  S  T
-*/
 
-void test()
-{
-
-}
+void fix_home_env();
 
 
 int main()
@@ -744,12 +717,12 @@ int main()
 
 	while(1)
 	{
-        getcwd(cwd, sizeof(cwd));
-        strcpy(cwd, replace_symbol(cwd, getenv("HOME"), "~"));  // after using move() function cwd gets printed as envvar HOME. why does this happen?
+        getcwd(current_working_directory, sizeof(current_working_directory));
+        strcpy(current_working_directory, replace_symbol(current_working_directory, getenv("HOME"), "~"));  // after using move() function cwd gets printed as envvar HOME. why does this happen?
 
         // Printing user, host name and current working directory.
         // [user@host:cwd]$ 
-        printf("["GREEN"%s@%s"RESET":"BLUE"%s"RESET"]$ ", login, host, cwd);
+        printf("["GREEN"%s@%s"RESET":"BLUE"%s"RESET"]$ ", login, host, current_working_directory);
         
         // Gets user input.
 		fgets(command, sizeof(command), stdin);
@@ -773,7 +746,7 @@ int main()
 		} 
         else if ((strcmp(paramater[0],"exit") == 0) || (strcmp(paramater[0],"q") == 0)) {
 			printf("\nProgram zakonczony\n\n");
-            exit(EXIT_SUCCESS);
+            exit(0);
         }
         else if (strcmp(paramater[0],"cd") == 0) {
             if (paramater_count == 1) {
@@ -782,10 +755,13 @@ int main()
             change_directory(paramater[1]);
         }
         else if (strcmp(paramater[0], "mv") == 0) {  // after running mv function once (eg. mv alpha omega) printing cwd with ~ doesn't work. why?
-            move(paramater[1], paramater[2]);
+            if (paramater_count != 3) {
+                printf("mv: invalid number of arguments passed\n");
+            }
+            else move(paramater[1], paramater[2]);
         }
         else if (strcmp(paramater[0], "test") == 0) {
-            test();
+            
         }
         else if (strcmp(paramater[0], "clear") == 0) {
             clear();
@@ -819,4 +795,12 @@ int main()
 			}
         }
     }
+}
+
+// somewhere in my program, the "HOME" env var is being modified by concatinating '/'
+// this isn't an elegant solution, but gets the job done
+void fix_home_env()
+{
+    if(getenv("HOME")[strlen(getenv("HOME"))-1] == '/')
+        getenv("HOME")[strlen(getenv("HOME"))-1] = '\0';
 }
