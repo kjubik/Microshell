@@ -1,5 +1,5 @@
 ## Description
-Project aimed at ressembling functioning of shell on Linux. Created for Operating Systems classes during 1st semester of Computer Science undergraduate programme.
+Project aimed at ressembling functioning of shell on Linux. Created for Operating Systems classes during 1st semester of Computer Science undergraduate programme. Graded 30 points out of 30 possible.
 
 ## Project requirements
 
