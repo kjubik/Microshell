@@ -22,7 +22,7 @@ Commands:
 - 'history' - display previously entered commands
 - 'ls' - list directory contents, usage: 'ls' [OPTIONS]
   - [-a] - do not ignore entries starting with .
-  - [-g]  like -l, but do not list owner\n"
+  - [-g]  like -l, but do not list owner"
   - [-G]  in a long listing, don't print group names
   - [-i]  print the index number of each file
   - [-l]  use a long listing format
