@@ -1,19 +1,49 @@
-#include <stdio.h>              
-#include <stdlib.h>             
-#include <string.h>             
-#include <unistd.h>             // getcwd, chdir
-#include <dirent.h>             // void ls() - struct dirent, readdir, closedir
+#include <dirent.h>
+#include <libgen.h>     // extract filenames, paths, translate relative paths
+#include <pwd.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/wait.h>           // not used
-#include <sys/stat.h>           // stat() - checking if entry is directory or file
-#include <errno.h>
+#include <sys/wait.h>
+#include <termios.h>    // control terminal settings
 #include <time.h>
-#include <sys/ioctl.h>          // terminal window size
-#include <math.h>
-#include <pwd.h>                // getpwuid()
+#include <unistd.h>
 
-char current_working_directory[PATH_MAX];
-char previous_directory[PATH_MAX];
+// sizes
+#define MAX_PATH_LENGTH 4096
+#define MAX_INPUT_LENGTH 256
+
+// navigation variables
+char cwd[MAX_PATH_LENGTH];
+char last_directory[MAX_PATH_LENGTH];
+
+// command arguments
+char *arguments[MAX_INPUT_LENGTH/2];
+int argument_count = 0;
+
+// history function variables
+#define MAX_HISTORY_SIZE 100    // saves last 99 inputs
+char history_buffer[MAX_HISTORY_SIZE][MAX_INPUT_LENGTH];
+int history_index = 0;
+int retrieve_index = 0;
+
+// terminal settings
+struct termios old_termios, raw_termios;
+
+// environment variables
+char *login;
+char *host;
+char *home;
+
+// file type codes
+#define NO_FILE 0
+#define DIRECTORY 1
+#define REGULAR_FILE 2
+#define OTHER_FILE 3
 
 // colors
 #define RED "\033[91m"
@@ -23,197 +53,49 @@ char previous_directory[PATH_MAX];
 #define PINK "\033[95m"
 #define CYAN "\033[96m"
 #define RESET "\033[0m"
-#define COMMAND_COLOR PINK
-
-// file type codes
-#define NO_FILE 0
-#define DIRECTORY 1
-#define REGULAR_FILE 2
-#define OTHER_FILE 3
-
-// animation duration
-#define ANIMATION 100000
-
-// history function variables
-#define HISTORY_LIMIT 99
-char command_history[HISTORY_LIMIT][256];
-int history_index = 0;
-int total_commands = 0;
-int index_shift = 0;
+#define BOLD "\033[1m"
+#define COMMAND_COLOR
+#define USER_COLOR GREEN
+#define AT_COLOR GREEN
+#define HOST_COLOR GREEN
+#define PATH_COLOR BLUE
 
 
-void ring() {
+// MINOR FUNCTIONS ------------------------------
+
+
+void alert() 
+{
     putchar('\a'); 
     fflush(stdout);
     return;
 }
 
 
+int check_file_type(char *path)
+{
+    struct stat filestat;
+    
+    if (stat(path, &filestat) != 0) return REGULAR_FILE;
+    else if (S_ISDIR(filestat.st_mode)) return DIRECTORY;
+    else return REGULAR_FILE;
+}
 
-void clear()
+
+void clear_terminal()
 {
     printf("\033c");
     return;
 }
 
 
-void startup()
+int get_terminal_width() 
 {
-    clear();
-    
-    struct winsize window; // https://stackoverflow.com/questions/18878141/difference-between-structures-ttysize-and-winsize
-    ioctl(STDOUT_FILENO, TIOCGWINSZ, &window);
-    int width = window.ws_col;
-    int height = window.ws_row;
-
-    printf("\033[?25l");  // hide text cursor
-
-    //single line of 'Nostromoshell' is 72 characters.
-    int align_nostromoshell = (width-72)/2;
-
-    // printing 'Nostromoshell'
-    // ASCII text - font 'Big' - https://textkool.com
-    printf("\n");
-    printf(GREEN);
-printf("%*s _   _           _                                 _          _ _ \n", align_nostromoshell, "");
-printf("%*s| \\ | |         | |                               | |        | | |\n", align_nostromoshell, "");
-printf("%*s|  \\| | ___  ___| |_ _ __ ___  _ __ ___   ___  ___| |__   ___| | |\n", align_nostromoshell, "");
-printf("%*s| . ` |/ _ \\/ __| __| '__/ _ \\| '_ ` _ \\ / _ \\/ __| '_ \\ / _ \\ | |\n", align_nostromoshell, "");
-printf("%*s| |\\  | (_) \\__ \\ |_| | | (_) | | | | | | (_) \\__ \\ | | |  __/ | |\n", align_nostromoshell, "");
-printf("%*s|_| \\_|\\___/|___/\\__|_|  \\___/|_| |_| |_|\\___/|___/_| |_|\\___|_|_|\n\n", align_nostromoshell, "");
-    printf(RESET);
-
-    // printing Weyland-Yutani Corporation
-    printf("\033[1m");
-    char weyland_yutani[] = "W E Y L A N D - Y U T A N I  C O R P O R A T I O N";
-    int align_WY = (width-strlen(weyland_yutani))/2;
-    printf("%*s%s\n", align_WY, "", weyland_yutani);
-    printf("\033[0m");
-
-    // spacing loading bar from header
-    int align_bar = (height-9)-6;
-    for (int l = 0; l < align_bar; l++) {
-        printf("\n");
-    }
-
-    // printing 
-    int align_loading = (width-24)/2;
-    printf("%*sinitializing system...\n\n", align_loading, "");
-
-    // printing laoding bar
-    printf(GREEN);
-    int bar_size = 72;
-    printf("%*s", (width-bar_size)/2, "");
-    for (int i = 0; i < bar_size; i++) {
-        printf("█");
-        fflush(stdout);
-        usleep(30000);
-    }
-    printf(RESET);
-
-    printf("\n\n");
-
-    usleep(200000);
-    printf("%*sboot successful\n", (width-20)/2, "");
-    sleep(1);
-
-    clear();
-
-    printf("property of\n"
-    "WEYLAND-YUTANI CORPORATION\n"
-    "\n"
-    "NAME: Nostromo\n"
-    "ID: 180924609\n"
-    "DEST: LV-426\n"
-    "\n");
-
-    printf("Use the "COMMAND_COLOR"help"RESET" command to view commands and project specification.\n\n");
-
-    return;
+    struct winsize window;
+    ioctl(0, TIOCGWINSZ, &window);
+    return window.ws_col;
 }
 
-
-void help()
-{
-	printf("IMPLEMENTED COMMANDS:\n"
-            COMMAND_COLOR"cd"RESET" - change current working directory\n"
-            COMMAND_COLOR"clear"RESET" - clear the terminal screen\n"
-            COMMAND_COLOR"exit"RESET" - terminate program\n"
-            COMMAND_COLOR"help"RESET" - display implemented commands and project specification\n"
-            COMMAND_COLOR"history"RESET" - display previously entered commands\n"
-            COMMAND_COLOR"ls"RESET" - list directory contents\n"
-            //"| -a | -g | -G | -i | -l | -p | -Q | -1 |\n"
-            "  -a  do not ignore entries starting with .\n"
-            "  -g  like -l, but do not list owner\n"
-            "  -G  in a long listing, don't print group names\n"
-            "  -i  print the index number of each file\n"
-            "  -l  use a long listing format\n"
-            "  -p  append / indicator to directories\n"
-            "  -Q  enclose entry names in double quotes\n"
-            "  -1  list one file per line.\n"
-            COMMAND_COLOR"mv"RESET" - move (rename) files\n"
-            //"file -> file | file -> directory | directory -> directory (recursively)\n\n"
-            "  Usage: mv SOURCE DEST\n"
-            "  Rename SOURCE to DEST, or move SOURCE to DIRECTORY.\n"
-            "  DIRECTORY moved/renamed recursively.\n"
-            "\n"
-            "BONUS FEATURES:\n"
-            "- custom startup animation\n"
-            "- user login and host name\n"
-            "- shortened home directory path\n"
-            "- color coded text\n"
-            "- sound alert for errors\n"
-            "\n"
-            "CODE BY:\n"
-            "Wojciech Kubicki\n");
-
-    return;
-}
-
-
-void crew()
-{
-    printf("032/V4-07C | Dallas, Arthur Coblenz - Captain\n"
-    "825/G9-01K | Kane, Gilbert Ward - Executive Officer\n"
-    "759/L2-01N | Ripley, Ellen Louis - Warrant Officer\n"
-    "111/C2/01X | Ash - Science Officer\n"
-    "971/L6-02P | Lambert, Joan Marie - Navigator\n"
-    "313/S4-08M | Parker, Denis Monroe - Chief Engineer\n"
-    "724/R4-06J | Brett, Samuel Elias - Engineering Technician\n");
-
-    return;
-}
-
-
-void change_directory(char *destination)
-{
-    // Saves current working directory for updating previous_directory later.
-    char temp_directory[PATH_MAX];
-    getcwd(temp_directory, sizeof(temp_directory));
-
-    // replace below if statement with code that inserts getenv("HOME") in place of '~' character
-    if (strcmp(destination, "~") == 0) {
-        chdir(getenv("HOME"));
-    }
-    else if (strcmp(destination, "-") == 0){
-        printf("%s\n", previous_directory);
-        chdir(previous_directory);  // previous_directory is initialy set to the HOME enviroment variable, updated after first cd function call
-    }
-    else {
-        if(chdir(destination) != 0){
-            ring();
-            printf("-bash: cd: %s: No such file or directory\n", destination);
-        }
-    }
-
-    // Updating previous_directory location.
-    strcpy(previous_directory, temp_directory);
-
-    return;
-}
-
-
-// below functions are used for mv()
 
 char *replace_symbol(char *path, char *target, char *replacement)
 {
@@ -226,85 +108,315 @@ char *replace_symbol(char *path, char *target, char *replacement)
 }
 
 
-char* replace_symbols(char *path)
-{
-    if (strcmp(path, ".") == 0) {
-        getcwd(current_working_directory, sizeof(current_working_directory));
-        return current_working_directory;
-    }
-    else if (strcmp(path, "~")== 0) {
-        return getenv("HOME");
-    }
-    else if (strcmp(path, "..") == 0) {
-        // code here
-    }
-    else {
-        getcwd(current_working_directory, sizeof(current_working_directory));
-        strcpy(path, replace_symbol(path, "./", strcat(current_working_directory, "/")));
-        char home[256];  // get stack smashing when sizeof(getenv("HOME")) <- why? works in list_files - probably because list_files calls this?
-        strcpy(path, replace_symbol(path, "~/", home));
-    }
+// INPUT HISTORY --------------------------------
 
-    return path;
+
+void save_input_to_history(char* input) 
+{
+    // checking if entered command is identical to previous
+    if (history_index != 0)
+    {
+        if (strcmp(input, history_buffer[history_index-1]) == 0) 
+            return;
+    } 
+
+    // saving entered command to history
+    strcpy(history_buffer[history_index], input);
+    history_index = (history_index + 1) % MAX_HISTORY_SIZE;
 }
 
 
-// don't use this code, haven't implemented navigating relative paths with ../
-char *relative_to_absolute(char *cwd, char *relative_path)
+void display_history() 
 {
-    char *absolute_path = malloc(PATH_MAX); // allocate memory for the absolute path
-    strcpy(absolute_path, cwd); // copy current working directory to the absolute path
-
-    char* token = strtok(relative_path, "/");
-    while (token != NULL) {
-        if (strcmp(token, "..") == 0) {
-            
-        }
-        else {
-
-        }
+    for (int i = 0; i < history_index; i++)
+    {
+        printf(" %d  %s\n", i + 1, history_buffer[i]);
     }
-
-    return absolute_path;
 }
 
 
-
-int check_file_type(char *path)
+void replace_input_with_history(int direction)
 {
-    DIR *directory = opendir(path);
-    if (directory != NULL) {
-        closedir(directory);
-        return DIRECTORY;
-    }
     
-    FILE *file = fopen(path, "r");
-    if (file != NULL) {
-        fclose(file);
-        return REGULAR_FILE;
-    }
-    
-    if (path[strlen(path)-1] == '/') {
-        return NO_FILE;
-    }
-    else return REGULAR_FILE; /* this could also be OTHER_FILE, but should I try and implement other files as well? 
-    I tried using 'struct stat entry;', but that was a mess. 
-    This if-else-tree for directories and regular files is a headache free solution. :) */
 }
 
 
-void extract_filename(char *path, char *filename)
-{ 
-        if (strchr(path, '/') != NULL) {  // if true then source path conatains directory/-ies
-            int i = 0, last;
-            for (i; i < strlen(path); i++) {  // gets index of last '/' character, all characters after '/' are the filename
-                if (path[i] == '/') last = i+1;
+// HANDLING USER INPUT --------------------------
+
+
+void change_terminal_settings()
+{
+    tcgetattr(STDIN_FILENO, &old_termios);
+    raw_termios = old_termios;
+    raw_termios.c_lflag &= ~(ICANON|ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &raw_termios);
+}
+
+
+void revert_terminal_settings()
+{
+    tcsetattr(STDIN_FILENO, TCSANOW, &old_termios);
+}
+
+
+void get_user_input(char *input)
+{
+    int input_index = 0;
+    int cursor_index = 0;
+    
+    while (true)
+    {
+        char key = getchar();
+
+        // enter
+        if (key == '\n') {
+            input[input_index] = '\0';
+            printf("\n");
+            break;
+        }
+
+        // backspace
+        if (key == 127)
+        {
+            if (cursor_index > 0) {
+                // removing characters from the end of the input
+                if (cursor_index == input_index)
+                {
+                    putchar('\b');
+                    putchar(' ');
+                    putchar('\b');
+                }
+                // removing characters from the middle of the input
+                else
+                {
+                    // shifting all characters after cursor position back one spot
+                    for (int temp_index = cursor_index - 1; temp_index < input_index; temp_index++)
+                    {
+                        input[temp_index] = input[temp_index + 1];
+                    }
+                    input[input_index] = '\0';
+
+                    // moving cursor back to begining of input
+                    for (int temp_index = cursor_index; temp_index > 0; temp_index--)
+                    {
+                        printf("\b");
+                    }
+
+                    // re-printing input without removed character
+                    for (int temp_index = 0; temp_index < input_index - 1; temp_index++)
+                    {
+                        putchar(input[temp_index]);
+                    }
+                    // covering up last character with blank space
+                    putchar(' ');
+
+                    // moving back cursor to proper position
+                    for (int temp_index = input_index; temp_index > cursor_index - 1; temp_index--)
+                    {
+                        printf("\b");
+                    }
+                }
+
+                // updating cursor and end of string
+                input_index--;
+                cursor_index--;
             }
-            strncpy(filename, path + last, strlen(path) - last);
+            continue;
         }
-        else strcpy(filename, path);
 
-    return;
+        // tab
+        if (key == '\t')
+        {
+            continue;
+        }
+
+        // escape character for arrow keys
+        if (key == '\033')
+        {
+            getchar();  // getting '[' character
+            switch (getchar())
+            {
+            case 'A':   // up arrow - replace input with previous input from history
+                if (retrieve_index > 0)
+                {
+                    retrieve_index--;
+                    int i;
+                    for (i = 0; i < input_index; i++) printf("%c", '\b');   // move cursor back to input begining
+                    for (i = 0; i < input_index; i++) printf("%c", ' ');    // overwriting all characters entered with empty space
+                    for (i = 0; i < input_index; i++) printf("%c", '\b');   // move cursor back to input begining
+                    printf("%s", history_buffer[retrieve_index]);           // insert command from history as input
+                    strcpy(input, history_buffer[retrieve_index]);
+                    input_index = strlen(history_buffer[retrieve_index]);
+                    cursor_index = strlen(history_buffer[retrieve_index]);
+                }
+                break;
+
+            case 'B':   // down arrow - replace input with next input from history
+                if (retrieve_index < history_index)
+                {
+                    retrieve_index++;
+                    int i;
+                    for (i = 0; i < input_index; i++) printf("%c", '\b');   // move cursor back to input begining
+                    for (i = 0; i < input_index; i++) printf("%c", ' ');    // overwriting all characters entered with empty space
+                    for (i = 0; i < input_index; i++) printf("%c", '\b');   // move cursor back to input begining
+                    printf("%s", history_buffer[retrieve_index]);           // insert command from history as input
+                    strcpy(input, history_buffer[retrieve_index]);
+                    input_index = strlen(history_buffer[retrieve_index]);
+                    cursor_index = strlen(history_buffer[retrieve_index]);
+                }
+                break;
+
+            case 'C':   // right arrow - move the cursor right one character
+                if (cursor_index < input_index)
+                {
+                    printf("%c", input[cursor_index]);
+                    cursor_index++;
+                }
+                else alert();
+                break;
+
+            case 'D':   // left arrow - move the cursor left one character
+                if (cursor_index > 0)
+                {
+                    cursor_index--;
+                    printf("\b");
+                }
+                else alert();
+                break;
+            }
+
+            continue;
+        }
+
+        if (cursor_index == input_index)
+        {
+            input[input_index++] = key;
+            cursor_index++;
+            putchar(key);
+        }
+        else 
+        {
+            // shifting all charcters after cursor by one spot
+            input_index++;
+            for (int temp_index = input_index; temp_index > cursor_index; temp_index--)
+            {
+                input[temp_index] = input[temp_index-1];
+            }
+
+            // inserting character into middle of string
+            input[cursor_index] = key;
+            cursor_index++;
+            putchar(key);
+
+            // re-printing all characters from input, but shifted by one position
+            for (int temp_index = cursor_index; temp_index < input_index; temp_index++)
+            {
+                putchar(input[temp_index]);
+            }
+
+            // moving cursor back to inserted character
+            for (int temp_index = input_index; temp_index > cursor_index; temp_index--)
+            {
+                printf("\b");
+            }
+        }
+    }
+}
+
+
+void tokenize(char *input)
+{
+    arguments[MAX_INPUT_LENGTH/2];
+    argument_count = 0;
+    
+    char *token = strtok(input, " \t");
+    while (token != NULL)
+    {
+        arguments[argument_count] = token;
+        token = strtok(NULL, " \t");
+        argument_count++;
+    } 
+    arguments[argument_count] = NULL;
+}
+
+
+// SHELL COMMANDS -------------------------------
+
+
+void change_directory()
+{
+    if (argument_count > 2)
+    {
+        alert();
+        printf("cd: too many arguments\n");
+        return;
+    }
+
+    
+    char destination[MAX_PATH_LENGTH];
+    if (argument_count == 1) strcpy(destination, getenv("HOME"));   // if no destination was specified, the home directory is set as the destination
+    else strcpy(destination, arguments[1]);     // second argument passed by user is the destination
+
+    // Saves current working directory for updating last_directory later.
+    char temp_directory[MAX_PATH_LENGTH];
+    getcwd(temp_directory, sizeof(temp_directory));
+
+    // note to self: should replace below if statement with code that inserts getenv("HOME") in place of '~' character
+    if (strcmp(destination, "~") == 0)
+    {
+        chdir(getenv("HOME"));
+    }
+    else if (strcmp(destination, "-") == 0)
+    {
+        printf("%s\n", last_directory);
+        chdir(last_directory);
+    }
+    else
+    {
+        if(chdir(destination) != 0)
+        {
+            alert();
+            printf("cd: %s: No such file or directory\n", destination);
+        }
+    }
+
+    // Updating last_directory location.
+    strcpy(last_directory, temp_directory);
+}
+
+
+void help()
+{
+    printf("\n"
+            BOLD"IMPLEMENTED COMMANDS:\n"
+            COMMAND_COLOR"cd"RESET" - change current working directory\n"
+            COMMAND_COLOR"clear"RESET" - clear terminal screen\n"
+            COMMAND_COLOR"exit"RESET" - terminate program\n"
+            COMMAND_COLOR"help"RESET" - display implemented commands and project specification\n"
+            COMMAND_COLOR"history"RESET" - display previously entered commands\n"
+            COMMAND_COLOR"ls"RESET" - list directory contents\n"
+            "   [-a]  do not ignore entries starting with .\n"
+            "   [-g]  like -l, but do not list owner\n"
+            "   [-G]  in a long listing, don't print group names\n"
+            "   [-l]  use a long listing format\n"
+            "   [-p]  append / indicator to directories\n"
+            "   [-Q]  enclose entry names in double quotes\n"
+            COMMAND_COLOR"mv"RESET" - move (rename) files\n"
+            "   Usage: mv {source} {destination}\n"
+            "   Rename {source} to {destination}, or move {source} to {directory}.\n"
+            "   Directories moved (renamed) recursively.\n"
+            "\n"
+            BOLD "BONUS FEATURES:\n" RESET
+            "- extensive control of key input\n"
+            "- history accessible through up/down arrow keys\n"
+            "- shortened home directory path\n"
+            "- color coded text\n"
+            "- custom startup animation\n"
+            "- sound alert for errors\n"
+            "- user login and host name\n"
+            "\n"
+            "Written by Wojciech Kubicki.\n"
+            "\n");
 }
 
 
@@ -314,299 +426,271 @@ void move_file(char *source, char *destination)
 
     FILE *source_file;
     source_file = fopen(source, "r");
-    if (source_file == NULL) {
-        ring();
-        perror(source);
+    if (source_file == NULL)
+    {
+        alert();
+        printf("mv: cannot stat '%s': No such file or directory\n", source);
         return;
     }
 
     FILE *destination_file;
     destination_file = fopen(destination, "w");
-    if (destination_file == NULL) {
-        ring();
-        perror("cannot move file: error opening file for writing");
+    if (destination_file == NULL)
+    {
+        alert();
+        printf("mv: cannot stat '%s': No such file or directory\n", destination);
         return;
     }
 
-    while ((byte = fgetc(source_file)) != EOF) {
+    while ((byte = fgetc(source_file)) != EOF)
+    {
         fputc(byte, destination_file);
     }
 
     fclose(source_file);
     fclose(destination_file);
-    remove(source);
 
-    return;
+    remove(source);
 }
 
 
-void move_directory(char *source, char *filename, char *destination)
+void move_directory(char *source, char *destination)
 {
     DIR *directory = opendir(source);
-    if (directory == NULL) {
-        ring();
-        perror("move_directory");
+    if (directory == NULL)
+    {
+        alert();
+        printf("mv: '%s' no such file or directory", source);
         return;
     }
 
-    // creates new directory in destination
-    char cwd[PATH_MAX];
-    getcwd(cwd, sizeof(cwd));
-    chdir(destination);
-    mkdir(filename, 0777);
-    chdir(cwd);
+    mkdir(destination, 0777);
 
-    // moves all children regular files and directories
     struct dirent *entry;
-    while ((entry = readdir(directory)) != NULL) {
-        // code here: get rwx permissions of file
+    while ((entry = readdir(directory)) != NULL)
+    {
+        char child_source[MAX_PATH_LENGTH];
+        strcpy(child_source, source);
+        strcat(child_source, "/");
+        strcat(child_source, entry->d_name);
 
-        if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
-            // runs function recursively for child directory found in source directory
-            char *new_source = malloc(PATH_MAX);
-            strcpy(new_source, source);
-            strcat(new_source, "/");
-            strcat(new_source, entry->d_name);
+        char child_destination[MAX_PATH_LENGTH];
+        strcpy(child_destination, destination);
+        strcat(child_destination, "/");
+        strcat(child_destination, entry->d_name);
 
-            char *new_filename = malloc(PATH_MAX);
-            strcpy(new_filename, entry->d_name);
-            
-            char *new_destination = malloc(PATH_MAX);
-            strcpy(new_destination, destination);
-            strcat(new_destination, "/");
-            strcat(new_destination, filename);
-
-            move_directory(new_source, new_filename, new_destination);
+        if (entry->d_type == DT_DIR && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0)
+        {
+            move_directory(child_source, child_destination);
         }
-        else if (entry->d_type == DT_REG) {
-            // moves file to directory
-            char *new_source = malloc(PATH_MAX);
-            strcpy(new_source, source);
-            strcat(new_source, "/");
-            strcat(new_source, entry->d_name);
-
-            char *new_destination = malloc(PATH_MAX);
-            strcpy(new_destination, destination);
-            strcat(new_destination, "/");
-            strcat(new_destination, filename);
-            strcat(new_destination, "/");
-            strcat(new_destination, entry->d_name);
-
-            move_file(new_source, new_destination);
-
+        else if (entry->d_type == DT_REG)
+        {
+            move_file(child_source, child_destination);
         }
     }
-    closedir(directory);
 
+    closedir(directory);
     rmdir(source);
-    return;
 }
 
 
-void move(char *source_no_malloc, char *destination_no_malloc)  
+void move()
 {
-    // copies paramaters passed into function into strings with larger memory allocation  - fixed truncation when replacing '~' with full path in replace_symbols
-    char *source = malloc(PATH_MAX);
-    strcpy(source, source_no_malloc);
-
-    char *destination = malloc(PATH_MAX);
-    strcpy(destination, destination_no_malloc);
-
-    // modifies paths containing "~" and/or "." with full path names <- without this opening files wasn't handled properly
-    char cwd[PATH_MAX];
-    getcwd(cwd, sizeof(cwd));
-
-    strcpy(source, replace_symbols(source));  // This is retarted. Files with extenstions ({filename}.{ext}) are unusable, because "." gets replaced with CWD
-    strcpy(destination, replace_symbols(destination));  // Same as above. This is retarted.
-
-    // THIS PART DOESN'T WORK RIGHT NOW. And I'll probably leave it as is. Too much work rewriting previous code
-    // checks if path is valid for paths requiring relative navigating using '..'
-    //if (strstr(source, "..")) strcpy(source, relative_to_absolute(cwd, source));
-    //if (strstr(destination, "..")) strcpy(destination, relative_to_absolute(cwd, destination));
-
-    int source_type = check_file_type(source), destination_type = check_file_type(destination);
-
-    if ((source_type == REGULAR_FILE) && (destination_type == REGULAR_FILE)) {
-        // checking if inodes of source file and destination file are the same
-        struct stat file1, file2;
-
-        if (stat(source, &file1) == -1) {
-            ring();
-            perror(source);
-            return;
-        }
-
-        stat(destination, &file2);  // omited checking for error, because file might not exist
-
-        if (file1.st_ino != file2.st_ino) {
-            move_file(source, destination);
-        }
-        else {
-            ring();
-            printf("mv:'%s' and '%s' are the same file\n", source, destination);
-            return;
-        }
-    }
-    else if ((source_type == REGULAR_FILE) && (destination_type == DIRECTORY)) {
-        // appends source filename to destination
-        char filename[PATH_MAX];
-        extract_filename(source, filename);
-
-        // needs to insert '/' as last character of destination
-        // the variable desitnation used in move_file() is of the format {char destination + "/" + char filename}
-        if (destination[strlen(destination) - 1] != '/') {
-            strcat(destination, "/");
-        }
-        strcat(destination, filename);
-
-        move_file(source, destination);
+    if (argument_count == 1)
+    {
+        alert();
+        printf("cp: missing file operand\n");
         return;
     }
-    else if (source_type == DIRECTORY /*&& destination_type == DIRECTORY*/)  {
-        char source_filename[PATH_MAX];
-        extract_filename(source, source_filename);
 
-        struct stat phantom_directory;
+    if (argument_count == 2)
+    {
+        alert();
+        printf("cp: missing destination file operand after '%s'\n", arguments[1]);
+        return;
+    }
+    
+    if (argument_count > 3)
+    {
+        alert();
+        printf("cp: too many arguments\n");
+        return;
+    }
 
-        if (stat(destination, &phantom_directory) == -1) {
-            char penultimate_path[PATH_MAX];
-            strcpy(penultimate_path, destination);
+    char source[MAX_INPUT_LENGTH];
+    strcpy(source, arguments[1]);
+    int source_type = check_file_type(source);
 
-            if (strrchr(penultimate_path, '/') != NULL) {
-                char *last_slash = strrchr(penultimate_path, '/');
-                if (last_slash != NULL) {
-                    *last_slash = '\0';
-                    
-                    if (stat(penultimate_path, &phantom_directory) == -1) {
-                        ring();
-                        perror(penultimate_path);
-                        return;
-                    }
-                    else {
-                        // move the source directory to the penultimate_path under a new name 
-                        // as declared by the last directory in the destination path
-                        char destination_filename[PATH_MAX];
-                        extract_filename(destination, destination_filename);
+    char destination[MAX_INPUT_LENGTH];
+    strcpy(destination, arguments[2]);
+    int destination_type = check_file_type(destination);
 
-                        move_directory(source, destination_filename, penultimate_path);
-                    }
+    if (source_type == REGULAR_FILE && destination_type == REGULAR_FILE)
+    {
+        move_file(source, destination);
+    }
+    else if (source_type == REGULAR_FILE && destination_type == DIRECTORY)
+    {
+        char *filename = basename(source);
+        strcat(destination, "/");
+        strcat(destination, filename);
+        move_file(source, destination);
+    }
+    else if (source_type == DIRECTORY && destination_type == DIRECTORY)
+    {
+        strcat(destination, "/");
+        strcat(destination, basename(source));
+        move_directory(source, destination);
+    }
+    else if (source_type == DIRECTORY)
+    {
+        // if there are no '/' characters in the destination, the source will just be renamed
+        if (strchr(destination, '/'))
+        {
+            // checking if the destination path exists, if yes, then the source directory will be moved under a new name
+            char destination_path[MAX_PATH_LENGTH];
+            strcpy(destination_path, destination);
+            dirname(destination_path);
+            if (check_file_type(destination_path) == DIRECTORY)
+            {  
+                move_directory(source, destination);
+            }
+            else
+            {
+                printf("cp: cannot overwrite non-directory '%s' with directory '%s'\n", destination, source);
+                return;
+            }
+        }
+        else
+        {
+            move_directory(source, destination);
+        }
+    }
+}
+
+
+void list()
+{
+    char path[MAX_PATH_LENGTH] = ".";
+    bool a = false, g = false, G = false, i = false, l = false, p = false, Q = false;
+    for (int i = 1; i < argument_count; i++)
+    {
+        if (arguments[i][0] == '-')
+        {
+            for (int j = 1; j < strlen(arguments[i]); j++)
+            {
+                char flag = arguments[i][j];
+                if (flag == 'a')
+                {
+                    a = true;
+                }
+                else if (flag == 'g')
+                {
+                    g = true;
+                }
+                else if (flag == 'G')
+                {
+                    G = true;
+                }
+                else if (flag == 'i')
+                {
+                    i = true;
+                }
+                else if (flag == 'l')
+                {
+                    l = true;
+                }
+                else if (flag == 'p')
+                {
+                    p = true;
+                }
+                else if (flag == 'Q')
+                {
+                    Q = true;
                 }
             }
-            else {
-                // if the destination doesn't contain a '/', 
-                // then the source is moved to the current directory under a new name
-                move_directory(source, destination, cwd);
-            }
         }
-
-        // make directory in destination
-        move_directory(source, source_filename, destination);
-        return;
-    }
-    else {
-        ring();
-        printf("mv: source and destination types are incompatible\n");
-        return;
+        else
+        {
+            strcpy(path, arguments[i]);
+        }
     }
 
-    return;
-}
-
-
-void list_files(char *arguments, char *location)
-{
-    // Allocates memory for path
-    char *path = malloc(PATH_MAX);
-    strcpy(path, location);
-    strcat(path, "/");
-    char home[sizeof(getenv("HOME"))];
-    strcpy(home, getenv("HOME"));
-    strcat(home, "/");
-    strcpy(path, replace_symbol(path, "~/", home));
-    
     DIR* directory = opendir(path);
-    if (directory == NULL) {
-        ring();
-        perror("ls");
+    if (directory == NULL)
+    {
+        alert();
+        printf("ls: could not open directory\n");
         return;
     }
 
-    long int total_size = 0;
-
-    // -R  list subdirectories recursively
-    if (strchr(arguments, 'R')) {
-        printf("%s:\n", path);
-    }
+    long int total_entries = 0;
 
     // reading every file in directory
     struct dirent *entry;
-    while ((entry = readdir(directory)) != NULL) {
-        // arguments applied before display
-        char name[PATH_MAX];
+    while ((entry = readdir(directory)) != NULL)
+    {
+        char name[MAX_PATH_LENGTH];
         strcpy(name, entry->d_name);
 
-        struct stat file_st;
-        stat(name, &file_st);
+        struct stat file_stat;
+        stat(name, &file_stat);
 
-        // -a  do not ignore entries starting with .
-        if (!strchr(arguments, 'a')) {
-            if (name[0] == '.')
+        // arguments applied BEFORE entry has been displayed --------
+
+        // [-a] do not ignore entries starting with .
+        if (!a)
+        {
+            if (name[0] == '.') 
                 continue;
-        }
-        
-
-        // -i  print the index number of each file
-        if (strchr(arguments, 'i')) {
-            printf("%ld ", entry->d_ino);
         }
 
         // -l  use a long listing format
         // -g  like -l, but do not list owner
-        if (strchr(arguments, 'l') || strchr(arguments, 'g')) {
-
-            if (S_ISDIR(file_st.st_mode)) printf("d");
+        if (l || g) 
+        {
+            if (S_ISDIR(file_stat.st_mode)) printf("d");
             else printf("-");
-            if (file_st.st_mode & S_IRUSR) printf("r");
+            if (file_stat.st_mode & S_IRUSR) printf("r");
             else printf("-");
-            if (file_st.st_mode & S_IWUSR) printf("w");
+            if (file_stat.st_mode & S_IWUSR) printf("w");
             else printf("-");
-            if (file_st.st_mode & S_IXUSR) printf("x");
+            if (file_stat.st_mode & S_IXUSR) printf("x");
             else printf("-");
-            if (file_st.st_mode & S_IRGRP) printf("r");
+            if (file_stat.st_mode & S_IRGRP) printf("r");
             else printf("-");
-            if (file_st.st_mode & S_IWGRP) printf("w");
+            if (file_stat.st_mode & S_IWGRP) printf("w");
             else printf("-");
-            if (file_st.st_mode & S_IXGRP) printf("x");
+            if (file_stat.st_mode & S_IXGRP) printf("x");
             else printf("-");
-            if (file_st.st_mode & S_IROTH) printf("r");
+            if (file_stat.st_mode & S_IROTH) printf("r");
             else printf("-");
-            if (file_st.st_mode & S_IWOTH) printf("w");
+            if (file_stat.st_mode & S_IWOTH) printf("w");
             else printf("-");
-            if (file_st.st_mode & S_IXOTH) printf("x");
+            if (file_stat.st_mode & S_IXOTH) printf("x");
             else printf("-");
             printf(" ");
 
-            printf("%ld ", file_st.st_nlink);
+            printf("%ld ", file_stat.st_nlink);
 
-            if (!strchr(arguments, 'g')) {
-                struct passwd *userid = getpwuid(file_st.st_uid);
+            // like -l, but do not list owner
+            if (!g) 
+            {
+                struct passwd *userid = getpwuid(file_stat.st_uid);
                 printf("%s ", userid->pw_name);
             }
 
-            if (!strchr(arguments, 'G')) {
-                struct passwd *groupid = getpwuid(file_st.st_gid);
+            // [-G] in a long listing, don't print group names
+            if (!G) 
+            {
+                struct passwd *groupid = getpwuid(file_stat.st_gid);
                 printf("%s ", groupid->pw_name);
             }
 
-            printf("%ld ", file_st.st_size);
-            total_size += file_st.st_size;
+            printf("%ld ", file_stat.st_size);
+            total_entries += file_stat.st_size;
 
-            // https://man7.org/linux/man-pages/man3/ctime.3.html
-            // https://www.ibm.com/docs/en/i/7.3?topic=functions-ctime-convert-time-character-string
-            // st_atime (access time) = when was it opened last as "r"
-            // st_mtime (modification time) = when was it opened last as "a" or "w"
-            // st_ctime (change mode time) = when was chmod() called on it last <- closest to time of creation
-            struct tm *time_st = localtime(&file_st.st_ctime);  // no st_birthtime member, had to use st_ctime - Linux doesn't support it? Seems that only MacOS does :(
+            struct tm *time_st = localtime(&file_stat.st_ctime);  // no st_birthtime member, had to use st_ctime - Linux doesn't support it? Seems that only MacOS does :(
             char month[4];
             strftime(month, sizeof(month), "%m", time_st);
             if (strcmp(month, "01") == 0) {
@@ -651,240 +735,139 @@ void list_files(char *arguments, char *location)
             printf("%s ", month);
         }
 
-        // -Q  enclose entry names in double quotes
-        if (strchr(arguments, 'Q')) {
+        // [-Q] enclose entry names in double quotes
+        if (Q)
+        {
             printf("\"");
         }
 
         // prints entry in directory
-        if (entry->d_type == DT_DIR) {  // file is a directory
-            printf(BLUE"%s"RESET, entry->d_name);
+        if (entry->d_type == DT_DIR)
+        {
+            printf(BLUE);
         }
-        else if (entry->d_type == DT_REG) {  // file is a regular file
-            // regfile variable created so that path to file can be passed in stat()
-            char regfile[PATH_MAX];
-            strcpy(regfile, path);
-            strcat(regfile, "/");
-            strcat(regfile, entry->d_name);
-
-            struct stat filestat;
-
-            if (stat(regfile, &filestat) == 0 && filestat.st_mode & S_IXUSR) {  // regular file is an executable
-                printf(GREEN"%s"RESET, entry->d_name);
-            }
-            else {  // regular file without execute permission
-                printf("%s", entry->d_name);
-            }
+        else if (entry->d_type == DT_LNK)
+        {
+            printf(CYAN);
+        }
+        else if (entry->d_type == DT_REG && file_stat.st_mode & S_IXUSR)
+        {
+            printf(GREEN);
         }
 
-        // arguments applied after file has been display
+        printf("%s" RESET, name);
 
-        // -Q  enclose entry names in double quotes
-        if (strchr(arguments, 'Q')) {
+        // arguments applied AFTER file has been displayed ----------
+
+        // [-Q] enclose entry names in double quotes
+        if (Q)
+        {
             printf("\"");
         }
 
         // -p  append / indicator to directories
-        if (strchr(arguments, 'p') && entry->d_type == DT_DIR) {
+        if (p && entry->d_type == DT_DIR) 
+        {
             printf("/");
         }
 
-        printf("  ");
-
-        // -1  list one file per line.
-        if (strchr(arguments, '1') || strchr(arguments, 'l') || strchr(arguments, 'g')) {
-            printf("\n");
-        }
-
-    }
-
-    if (!(strchr(arguments, '1') || strchr(arguments, 'l') || strchr(arguments, 'g'))) 
         printf("\n");
+    }
 
     closedir(directory);
 
-    if (strchr(arguments, 'l')) {
-        printf("total %ld\n", total_size);
+    // [-l] use a long listing format -> this includes the total number of entries
+    if (l) 
+    {
+        printf("total %ld\n", total_entries);
     }
-
-    if (strchr(arguments, 'R')) {
-        DIR* directory = opendir(path);
-        if (directory == NULL) {
-            ring();
-            perror("ls");
-            return;
-        }
-
-        while ((entry = readdir(directory)) != NULL) {
-            if (entry->d_type == DT_DIR && entry->d_name[0] != '.') {  // directories with "." would casue problem on Ubuntu VM on home workstation
-                char child_path[PATH_MAX];
-                strcpy(child_path, path);
-                strcat(child_path, entry->d_name);
-                printf("\n");
-                list_files(arguments, child_path);
-            }
-        }
-        closedir(directory);
-    }
-
-    return;
 }
 
 
-/* history_index = number of last entered command
-command_history = list containing entered commands
-command_count = number of lines to print out */
-void save_history(char *command) 
-{
-    total_commands++;
-    if (history_index == HISTORY_LIMIT) {
-        // removes the first command saved and moves each next command to the previous index
-        for (int i = 0; i < HISTORY_LIMIT - 1; i++) {
-            strcpy(command_history[i], command_history[i + 1]);
-        }
-        history_index--;
-        index_shift++;
-    }
-    strcpy(command_history[history_index], command);
-    history_index++;
-
-    return;
-}
-
-
-void list_history() 
-{
-    if (history_index < 10) {
-        for (int i = 0; i < history_index; i++) {
-            printf(" %d  %s", i + index_shift + 1, command_history[i]);
-        }
-    }
-    else {
-        for (int i = 0; i < 9; i++) {
-            printf("  %d  %s", i + index_shift + 1, command_history[i]);
-        }
-        for (int i = 9; i < history_index; i++) {
-            printf(" %d  %s", i + index_shift + 1, command_history[i]);
-        }
-    }
-    
-
-    return;
-}
-
-
-void fix_home_env();
+// ----------------------------------------------
 
 
 int main()
 {
-    startup();
-    chdir(getenv("HOME"));
+    printf("Welcome to my microshell project! Use the 'help' command to view the project specifications.\n\n");
 
-    char cwd[PATH_MAX];
-	char command[PATH_MAX];
-    char *paramater[PATH_MAX];
-    int paramater_count;
+    // getting environment varaibles
+    login = getenv("USER");
+    host = getenv("NAME");
+    home = getenv("HOME");
 
-    char *login = getenv("USER");
-    char *host = getenv("NAME");  // Ubuntu doesn't have HOST variable in env, uses 'NAME' instead. Grep returns 'NAME={machine_name}' when searching for machine name.
-    char *home = getenv("HOME");
+    while (true) {
+        char input[MAX_INPUT_LENGTH];
+        retrieve_index = history_index;    // updates the command which the user will retrieve with up arrow key to the last saved command
 
-    getcwd(previous_directory, sizeof(previous_directory));
+        getcwd(cwd, sizeof(cwd));
+        strcpy(cwd, replace_symbol(cwd, home, "~"));
 
-	while(1)
-	{
-        getcwd(current_working_directory, sizeof(current_working_directory));
-        strcpy(current_working_directory, replace_symbol(current_working_directory, getenv("HOME"), "~"));  // after using move() function cwd gets printed as envvar HOME. why does this happen?
+        // displaying: [user@host:path]$
+        printf("|"USER_COLOR"%s"AT_COLOR"@"HOST_COLOR"%s"RESET":"PATH_COLOR"%s"RESET"|$ ", login, host, cwd);
 
-        // Printing user, host name and current working directory.
-        // [user@host:cwd]$ 
-        printf("["GREEN"%s@%s"RESET":"BLUE"%s"RESET"]$ ", login, host, current_working_directory);
-        
-        // Gets user input.
-		fgets(command, sizeof(command), stdin);
-        if (strcmp(command, "\n") != 0) {  // Skip empty input.
-            save_history(command);
-            // Tokenizing string into paramaters.
-            paramater_count = 0;
-            char *token = strtok(command, " \n");  // TO ADD: Read all spaces in between quotes.
-            while(token != NULL){
-                paramater[paramater_count] = token;
-                token = strtok(NULL, " \n");
-                paramater_count++;
+        change_terminal_settings();
+
+        get_user_input(input);
+
+        revert_terminal_settings();
+
+        if (strlen(input) != 0)     // only operate on non empty input
+        {
+            // saving input to history
+            save_input_to_history(input);
+
+            // tokenizing input into arguments
+            tokenize(input);
+
+            // find command entered by user
+            if (strcmp(arguments[0], "alert") == 0) 
+            {
+                alert();
             }
-            paramater[paramater_count] = NULL;  // This fixed segmentation fold.
-        }
-        else continue;
-        
-        // Checking for command in my microshell function implementations.
-		if (strcmp(paramater[0],"help") == 0) {
-            help();
-		} 
-        else if ((strcmp(paramater[0],"exit") == 0) || (strcmp(paramater[0],"q") == 0)) {
-            clear();
-            exit(0);
-        }
-        else if (strcmp(paramater[0],"cd") == 0) {
-            if (paramater_count == 1) {
-                paramater[1] = "~";
+            else if (strcmp(arguments[0], "cd") == 0) 
+            {
+                change_directory();
+            } 
+            else if (strcmp(arguments[0], "clear") == 0) 
+            {
+                clear_terminal();
+            } 
+            else if (strcmp(arguments[0], "mv") == 0) 
+            {
+                move();
             }
-            change_directory(paramater[1]);
-        }
-        else if (strcmp(paramater[0], "mv") == 0) {  // after running mv function once (eg. mv alpha omega) printing cwd with ~ doesn't work. why?
-            if (paramater_count != 3) {
-                ring();
-                printf("mv: invalid number of arguments passed\n");
+            else if (strcmp(arguments[0], "exit") == 0) 
+            {
+                clear_terminal();
+                return 0;
+            } 
+            else if(strcmp(arguments[0], "help") == 0) 
+            {
+                help();
+            } 
+            else if (strcmp(arguments[0], "history") == 0) 
+            {
+                display_history();
             }
-            else move(paramater[1], paramater[2]);
-        }
-        else if (strcmp(paramater[0], "test") == 0) {
-            ring();
-        }
-        else if (strcmp(paramater[0], "clear") == 0) {
-            clear();
-        }
-        else if (strcmp(paramater[0], "crew") == 0) {
-            crew();
-        }
-        else if (strcmp(paramater[0], "ls") == 0) {
-            char location[PATH_MAX] = ".";
-            char arguments[20] = "";
-
-            for (int i = 1; i < paramater_count; i++) {
-                if (paramater[i][0] == '-') {
-                    strcat(arguments, paramater[i]);
+            else if (strcmp(arguments[0], "ls") == 0)
+            {
+                list();
+            }
+            else 
+            {
+                if (fork() == 0) {
+                    exit(execvp(arguments[0],arguments));
                 }
                 else {
-                    strcpy(location, paramater[i]);
+                    int status = 0;
+                    wait(&status);
+                    if(status == 65280) {
+                        alert();
+                        printf("%s: command not found\n", arguments[0]);
+                    }
                 }
             }
-
-            list_files(arguments, location);
-        }
-        else if (strcmp(paramater[0], "history") == 0) {
-            list_history();
-        }
-		else {  // If entered command isn't implemented in program, run the bash command.
-            if (fork() == 0) {
-				exit(execvp(paramater[0],paramater));
-			}
-			else {
-				int status = 0;
-				wait(&status);
-                if(status == 65280) {
-                    ring();
-                    printf("%s: command not found\n", paramater[0]);
-                }
-			}
         }
     }
-}
-
-// somewhere in my program, the "HOME" env var is being modified by concatinating '/'
-// this isn't an elegant solution, but gets the job done
-void fix_home_env()
-{
-    if(getenv("HOME")[strlen(getenv("HOME"))-1] == '/')
-        getenv("HOME")[strlen(getenv("HOME"))-1] = '\0';
 }
