@@ -14,7 +14,7 @@ Project aimed at ressembling functioning of shell on Linux. Created for Operatin
 
 ## My features
 
-Commands:
+### Commands:
 - 'cd' - change directory
 - 'clear' - clear terminal screen
 - 'exit' - terminate program
@@ -33,7 +33,7 @@ Commands:
   - Rename {source} to {destination}, or move {source} to {directory}.
   - {directory} moved/renamed recursively.
   
-Additional features:
+### Additional features:
 - extensive control of key input
 - history accessible through up/down arrow keys
 - shortened home directory path
