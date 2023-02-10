@@ -1,3 +1,5 @@
+![micro](https://user-images.githubusercontent.com/92546520/217977480-9299c4e7-df5b-437c-876e-6ce75e3f272a.png)
+
 ## Description
 Project aimed at ressembling functioning of shell on Linux. Created for Operating Systems classes during 1st semester of Computer Science undergraduate programme. Graded 30 points out of 30 possible.
 
