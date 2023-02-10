@@ -22,7 +22,7 @@ Project aimed at ressembling functioning of shell on Linux. Created for Operatin
 - 'history' - display previously entered commands
 - 'ls' - list directory contents, usage: 'ls' [OPTIONS]
   - [-a] - do not ignore entries starting with .
-  - [-g]  like -l, but do not list owner"
+  - [-g]  like -l, but do not list owner
   - [-G]  in a long listing, don't print group names
   - [-l]  use a long listing format
   - [-p]  append / indicator to directories
