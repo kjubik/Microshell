@@ -1,7 +1,7 @@
-# Description
+## Description
 Project aimed at ressembling functioning of shell on Linux. Created for Operating Systems classes during 1st semester of Computer Science undergraduate programme.
 
-# Project requirements
+## Project requirements
 
 - display a prompt of the form [{path}] $, where {path} is the path to the current working directory
 - handle 'cd' command, which works similarly to the 'cd' known from the bash shell
@@ -12,7 +12,7 @@ Project aimed at ressembling functioning of shell on Linux. Created for Operatin
 - (optional) handle two other shell commands of your choice (your own stand-alone, intermediate implementation of two commands)
 - (optional) have bonus features, e.g. displaying the login of the currently logged-in user, color support, support for arguments in quotation marks, meaningful signal support (e.g. Ctrl+Z), command history support via arrows, syntax completion, etc.; points are awarded according to the complexity of the problem
 
-# My features
+## My features
 
 Commands:
 - 'cd' - change directory
