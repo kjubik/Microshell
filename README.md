@@ -38,6 +38,5 @@ Project aimed at ressembling functioning of shell on Linux. Created for Operatin
 - history accessible through up/down arrow keys
 - shortened home directory path
 - color coded text
-- custom startup animation
 - sound alert for errors
 - user login and host name
