@@ -135,12 +135,6 @@ void display_history()
 }
 
 
-void replace_input_with_history(int direction)
-{
-    
-}
-
-
 // HANDLING USER INPUT --------------------------
 
 
