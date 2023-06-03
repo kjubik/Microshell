@@ -1,44 +1,65 @@
-![micro](https://user-images.githubusercontent.com/92546520/217977480-9299c4e7-df5b-437c-876e-6ce75e3f272a.png)
+# 🐚 C Shell
 
-## Description
-Project aimed at ressembling functioning of shell on Linux. Created for Operating Systems classes during 1st semester of Computer Science undergraduate programme. Graded 30 points out of 30 possible.
+A simple shell program written in C. The shell provides a command-line interface for executing various commands and interacting with the operating system. Written for Operating systems classes at the University of Adam Mickiewicz in Poznań.
 
-## Project requirements
+## Commands
 
-- display a prompt of the form [{path}] $, where {path} is the path to the current working directory
-- handle 'cd' command, which works similarly to the 'cd' known from the bash shell
-- handle 'exit' command, terminating the shell program
-- handle 'help' command, displaying information on the screen about the author of the program and the functionality it offers
-- handle commands referring by name to programs located in directories described by the value of the PATH environment variable, and allow these scripts and programs to be called with arguments (using both: fork() + exec*())
-- print an error message when command cannot be interpreted properly
-- (optional) handle two other shell commands of your choice (your own stand-alone, intermediate implementation of two commands)
-- (optional) have bonus features, e.g. displaying the login of the currently logged-in user, color support, support for arguments in quotation marks, meaningful signal support (e.g. Ctrl+Z), command history support via arrows, syntax completion, etc.; points are awarded according to the complexity of the problem
+### `cd`
 
-## My features
+Change the current working directory.
 
-### Commands:
-- 'cd' - change directory
-- 'clear' - clear terminal screen
-- 'exit' - terminate program
-- 'help' - display implemented commands and project specification
-- 'history' - display previously entered commands
-- 'ls' - list directory contents, usage: 'ls' [OPTIONS]
-  - [-a] - do not ignore entries starting with .
-  - [-g]  like -l, but do not list owner
-  - [-G]  in a long listing, don't print group names
-  - [-l]  use a long listing format
-  - [-p]  append / indicator to directories
-  - [-Q]  enclose entry names in double quotes
-  - [-R]  list subdirectories recursively
-- 'mv' - move (rename) files
-  - Usage: mv {source} {destination}
-  - Rename {source} to {destination}, or move {source} to {directory}.
-  - {directory} moved/renamed recursively.
-  
-### Additional features:
-- extensive control of key input
-- history accessible through up/down arrow keys
-- shortened home directory path
-- color coded text
-- sound alert for errors
-- user login and host name
+Syntax: `cd [directory]`
+
+- If no `directory` is specified, the home directory is set as the destination.
+- Use `~` as a shortcut for the home directory.
+- Use `-` as a shortcut to switch to the previous directory.
+
+### `clear`
+
+Clear the terminal screen.
+
+### `exit`
+
+Terminate the shell.
+
+### `help`
+
+Display implemented commands and project specifications.
+
+### `history`
+
+Display previously entered commands.
+
+### `ls`
+
+List directory contents.
+
+Syntax: `ls [options]`
+
+Available options:
+
+- `-a`: Do not ignore entries starting with `.`.
+- `-g`: Like `-l`, but do not list owner.
+- `-G`: In a long listing, don't print group names.
+- `-l`: Use a long listing format.
+- `-p`: Append `/` indicator to directories.
+- `-Q`: Enclose entry names in double quotes.
+
+### `mv`
+
+Move (rename) files or directories.
+
+Syntax: `mv [source] [destination]`
+
+- Rename `source` to `destination`, or move `source` to `directory`.
+- Directories are moved (renamed) recursively.
+
+## Bonus Features
+
+- Extensive control of key input.
+- History accessible through up/down arrow keys.
+- Shortened home directory path.
+- Color-coded text.
+- Custom startup animation.
+- Sound alert for errors.
+- User login and host name.
